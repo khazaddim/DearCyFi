@@ -1,15 +1,11 @@
 import bisect
-import importlib
 from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
-try:
-    locator_time3 = importlib.import_module("dearcyfi.PyTimeLocator.locator_time3")
-except ModuleNotFoundError:
-    import PyTimeLocator.locator_time3 as locator_time3
+from dearcyfi.PyTimeLocator import locator_time3
 
 
 def _median_delta_time(series: pd.Series) -> int | float:

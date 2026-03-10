@@ -1,5 +1,6 @@
 requests
 numpy
 dearcygui
-pytx
+pandas
 pillow
+pytz

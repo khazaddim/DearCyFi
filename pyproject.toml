@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dearcyfi"
+version = "0.1.0"
+description = "Financial charting widget toolkit for DearCyGui"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "DearCyFi Contributors" }
+]
+dependencies = [
+  "dearcygui",
+  "numpy",
+  "pandas",
+  "pillow",
+  "pytz",
+  "requests"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["DearCyFi"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dearcyfi*"]

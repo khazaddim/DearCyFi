@@ -7,20 +7,13 @@ Usage notes:
 """
 
 import asyncio
-import importlib
 from datetime import datetime
 
 import dearcygui as dcg
 from dearcygui.utils.asyncio_helpers import AsyncPoolExecutor, run_viewport_loop
 
-try:
-    DearCyFi = importlib.import_module("dearcyfi").DearCyFi
-    generate_fake_candlestick_data = importlib.import_module(
-        "dearcyfi.candle_utils.candle_gen"
-    ).generate_fake_candlestick_data
-except ModuleNotFoundError:
-    from DearCyFi import DearCyFi
-    from candle_utils.candle_gen import generate_fake_candlestick_data
+from dearcyfi.candle_utils.candle_gen import generate_fake_candlestick_data
+from dearcyfi import DearCyFi
 
 
 loop = asyncio.new_event_loop()
@@ -162,10 +155,7 @@ class DearCyFiDemo:
             length=300,
         )
         if not hasattr(self, "orig_candlestick"):
-            try:
-                PlotCandleStick = importlib.import_module("dearcyfi.DCG_Candle_Utils").PlotCandleStick
-            except ModuleNotFoundError:
-                from DCG_Candle_Utils import PlotCandleStick
+            from dearcyfi.DCG_Candle_Utils import PlotCandleStick
 
             with self.orig_plot:
                 self.orig_candlestick = PlotCandleStick(
