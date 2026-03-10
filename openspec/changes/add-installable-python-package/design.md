@@ -12,6 +12,12 @@ DearCyFi currently behaves like a script-style repository with top-level modules
 - Decision: Prefer `src` layout (`src/dearcyfi/...`) to prevent accidental imports from repository root during development.
 - Decision: Use `pyproject.toml` with setuptools build backend for packaging metadata and build configuration.
 - Decision: Keep a compatibility strategy for existing imports (short-term shim or documented migration) to reduce breakage.
+- Decision: Support legacy import `from DearCyFi import DearCyFi` for one transition release, document deprecation, then remove it in the next planned release.
+- Decision: Update import sites to package-aware paths during migration, including:
+	- `DearCyFi_Demo.py`: import `DearCyFi` and helpers from `dearcyfi...` namespace.
+	- `candle_utils/gap_utils.py`: replace locator import with `from dearcyfi.PyTimeLocator import locator_time3`.
+- Decision: Include `DearCyFi_Demo.py` as an installable/distributed example entrypoint (or package example asset) to preserve a runnable reference workflow.
+- Decision: Exclude notebook files (`*.ipynb`) from distribution artifacts by default.
 
 ## Alternatives Considered
 - Flat/top-level packaging with `py_modules` plus mixed packages.
@@ -30,11 +36,10 @@ DearCyFi currently behaves like a script-style repository with top-level modules
 ## Migration Plan
 1. Introduce package metadata and namespace.
 2. Move/update runtime modules and imports.
-3. Validate editable install and artifact install.
-4. Update README usage examples.
-5. Deprecate old import style through documentation (and optional temporary shim if retained).
-
-## Open Questions
-- Should legacy import `from DearCyFi import DearCyFi` remain supported for one transition release?
-- Should demo files be shipped as package extras/examples or stay repository-only?
-- Should notebooks be excluded from distribution artifacts by default?
+3. Update package-aware imports at known call sites:
+	- `DearCyFi_Demo.py` to `dearcyfi` namespace imports.
+	- `candle_utils/gap_utils.py` locator import to `from dearcyfi.PyTimeLocator import locator_time3`.
+4. Validate editable install and artifact install.
+5. Update README usage examples.
+6. Deprecate old import style through documentation and temporary shim.
+7. Remove legacy import support in the subsequent planned release after migration guidance has been published.
