@@ -53,28 +53,28 @@ class DearCyFiDemo:
                         label="Gaps n' Chunks",
                         width="fillx",
                         height='main_window.height/24+10', #32
-                        callback=lambda s, a, u: self.plot.add_gaps_chunks_GUI(s, a, u),
+                        callback=lambda s, a, u: self.DCF_plot.add_gaps_chunks_GUI(s, a, u),
                     )
                     self.collapse_button = dcg.Button(
                         self.C,
                         label="Collapse Time",
                         width="fillx",
                         height='main_window.height/24+10', #32
-                        callback=lambda s, a, u: self.plot.collapse_time_chart(s, a, u),
+                        callback=lambda s, a, u: self.DCF_plot.collapse_time_chart(s, a, u),
                     )
                     self.collapse_vec_button = dcg.Button(
                         self.C,
                         label="Collapse Time Vec",
                         width="fillx",
                         height='main_window.height/24+10', #32
-                        callback=lambda s, a, u: self.plot.collapse_time_chart_vec(s, a, u),
+                        callback=lambda s, a, u: self.DCF_plot.collapse_time_chart_vec(s, a, u),
                     )
                     self.load_bars_button = dcg.Button(
                         self.C,
                         label="Load Bar Data",
                         width="fillx",
                         height='main_window.height/24+10', #32
-                        callback=lambda s, a, u: self.plot.load_horizontal_bars(s, a, u),
+                        callback=lambda s, a, u: self.DCF_plot.load_horizontal_bars(s, a, u),
                     )
 
                     self.status_text = dcg.SharedStr(
@@ -94,7 +94,7 @@ class DearCyFiDemo:
                 with dcg.ChildWindow(self.C, label="Right Side"):
                     with dcg.TabBar(self.C):
                         with dcg.Tab(self.C, label="Collapsed Time Chart"):
-                            self.plot = DearCyFi(
+                            self.DCF_plot = DearCyFi(
                                 self.C,
                                 label="DearCyFi Plot",
                                 width="fillx",
@@ -145,7 +145,7 @@ class DearCyFiDemo:
             length=500,
         )
 
-        self.plot.set_data(
+        self.DCF_plot.set_data(
             dates=dates,
             opens=opens,
             highs=highs,
