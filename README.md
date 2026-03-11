@@ -20,13 +20,3 @@ python -m pip install .
 ```python
 from dearcyfi import DearCyFi
 ```
-
-## Migration Note
-
-Canonical import path is now:
-
-```python
-from dearcyfi import DearCyFi
-```
-
-Legacy import `from DearCyFi import DearCyFi` is provided as a temporary compatibility shim for one transition release.

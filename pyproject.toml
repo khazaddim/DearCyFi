@@ -23,7 +23,6 @@ dependencies = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["DearCyFi"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
