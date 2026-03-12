@@ -207,7 +207,7 @@ time_series_tools.py
 .cursorindexingignore
 
 # Local testing jupyter notebooks
-
+Testing_env_notes.ipynb
 
 # Marimo
 marimo/_static/
