@@ -118,3 +118,14 @@ def generate_fake_candlestick_data(
     index = np.arange(len(dates))
 
     return dates, opens, highs, lows, closes, index, volume
+
+if __name__ == "__main__":
+    # Example usage of the function
+    dates, opens, highs, lows, closes, index, volume = generate_fake_candlestick_data()
+    print("Dates:", dates)
+    print("Opens:", opens)
+    print("Highs:", highs)
+    print("Lows:", lows)
+    print("Closes:", closes)
+    print("Index:", index)
+    print("Volume:", volume)
