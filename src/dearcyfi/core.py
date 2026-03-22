@@ -100,6 +100,9 @@ class DearCyFi(dcg.Plot):
         self.candlestick_plot = None
         self.horizontal_bars = None
 
+        self.debug_text = dcg.SharedStr(context, value="")
+        self._last_tick_counts: dict[str, int] = {}
+
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
         self.Y1.label = "Price ($)"
@@ -128,8 +131,38 @@ class DearCyFi(dcg.Plot):
                 return i
         return locator_time3.TIME_YR
 
+    _UNIT_NAMES: tuple[str, ...] = ("US", "MS", "S", "MIN", "HR", "DAY", "MO", "YR")
+
     def get_last_resize_time_format_info(self) -> dict[str, object]:
         return dict(self._last_resize_time_format_info)
+
+    def _format_debug_text(self) -> str:
+        """Build a compact multiline debug string from the last resize info and tick counts."""
+        info = self._last_resize_time_format_info
+        if not info:
+            return ""
+        u0 = int(info.get("unit0", -1))
+        u1 = int(info.get("unit1", -1))
+        u0_name = self._UNIT_NAMES[u0] if 0 <= u0 < len(self._UNIT_NAMES) else str(u0)
+        u1_name = self._UNIT_NAMES[u1] if 0 <= u1 < len(self._UNIT_NAMES) else str(u1)
+        fmt0 = info.get("fmt0", {})
+        fmt1 = info.get("fmt1", {})
+        fmtf = info.get("fmtf", {})
+        tc = self._last_tick_counts
+        lines = [
+            f"unit0={u0_name}  unit1={u1_name}  collapsed={info.get('collapsed', False)}",
+            f"span={info.get('span_seconds', 0):.1f}s  px={info.get('pixels', 0):.0f}  span/100px={info.get('span_per_100px', 0):.2f}",
+            f"fmt0: date={fmt0.get('date_fmt')} time={fmt0.get('time_fmt')}",
+            f"fmt1: date={fmt1.get('date_fmt')} time={fmt1.get('time_fmt')}",
+            f"fmtf: date={fmtf.get('date_fmt')} time={fmtf.get('time_fmt')}",
+            f"ticks: L0={tc.get('level0', 0)} L1={tc.get('level1', 0)} total={tc.get('total', 0)}",
+            f"labels_rendered={tc.get('labels_rendered', 0)}",
+        ]
+        if tc.get("boundary_year") or tc.get("boundary_month") or tc.get("boundary_day"):
+            lines.append(
+                f"boundaries: yr={tc.get('boundary_year', 0)} mo={tc.get('boundary_month', 0)} day={tc.get('boundary_day', 0)}"
+            )
+        return "\n".join(lines)
 
     def get_time_format_config(self) -> dict[str, object]:
         return {
@@ -417,9 +450,11 @@ class DearCyFi(dcg.Plot):
 
             # Inject additional major ticks at calendar boundaries (year/month/day)
             # using real timestamps, then map them back into collapsed axis coordinates.
+            _boundary_counts: dict[str, int] = {}
             for kind, arr in boundaries:
                 if arr.size == 0:
                     continue
+                _kind_count = 0
                 for t_real in arr:
                     x = float(self._gap_manager.time_map.collapse(float(t_real)))
                     if x < min_time or x > max_time:
@@ -430,6 +465,7 @@ class DearCyFi(dcg.Plot):
                     elif kind == "month":
                         spec = locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
                     else:
+                        # This else statement is suspect for causing excessive tick generation when day boundaries are included.
                         spec = locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
                     label = locator_time3.format_datetime(
                         tp,
@@ -439,6 +475,11 @@ class DearCyFi(dcg.Plot):
                         use_iso8601=use_iso8601,
                     )
                     ticks.append(locator_time3.Tick(pos=x, level=1, major=True, show_label=True, label=label))
+                    _kind_count += 1
+                _boundary_counts[kind] = _kind_count
+            self._last_tick_counts.update({
+                f"boundary_{k}": v for k, v in _boundary_counts.items()
+            })
 
         # Group labels by (rounded) x-position so overlapping major/minor ticks can be
         # merged into a single rendered label entry at that coordinate.
@@ -490,6 +531,17 @@ class DearCyFi(dcg.Plot):
             majors.append(bool(major_label is not None))
 
         self._apply_custom_x_labels(labels, coords, majors=majors, no_gridlines=False)
+
+        # Update tick counts for debug overlay
+        n_l0 = sum(1 for t in ticks if t.level == 0)
+        n_l1 = sum(1 for t in ticks if t.level == 1)
+        self._last_tick_counts = {
+            "level0": n_l0,
+            "level1": n_l1,
+            "total": len(ticks),
+            "labels_rendered": len(labels),
+        }
+        self.debug_text.value = self._format_debug_text()
 
         if self.horizontal_bars is not None:
             self.horizontal_bars.update_positions(max_time)
