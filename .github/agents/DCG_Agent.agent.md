@@ -14,3 +14,7 @@ Be careful about the kwargs.  dearpygui has a 'pos' that defines the position of
 DearCyGui uses attribute-based configuration and context objects.
 If you are unsure, ask for clarification before generating code.
 If you accidentally use DearPyGui code, note it and then correct it to DearCyGui style.
+
+Use the DCG demos and documentation and examples as your primary reference for code generation and explanations:
+
+https://github.com/DearCyGui/Demos
