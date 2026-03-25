@@ -36,6 +36,8 @@ class DearCyFi(dcg.Plot):
 
         self._on_status = on_status
 
+        print('loaded version with inject boundary ticks')
+
         self._time_locator_use_local_time = use_local_time
         self._time_locator_use_24_hour = use_24_hour
         self._time_locator_use_iso8601 = use_iso8601
