@@ -140,6 +140,15 @@ class DearCyFi(dcg.Plot):
     def get_last_resize_time_format_info(self) -> dict[str, object]:
         return dict(self._last_resize_time_format_info)
 
+    @property
+    def inject_boundary_ticks(self) -> bool:
+        """Whether boundary tick injection at calendar discontinuities is enabled."""
+        return self._inject_boundary_ticks
+
+    @inject_boundary_ticks.setter
+    def inject_boundary_ticks(self, value: bool) -> None:
+        self._inject_boundary_ticks = bool(value)
+
     def _format_debug_text(self) -> str:
         """Build a compact multiline debug string from the last resize info and tick counts."""
         info = self._last_resize_time_format_info
