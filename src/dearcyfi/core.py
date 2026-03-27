@@ -27,6 +27,7 @@ class DearCyFi(dcg.Plot):
         font_path: str | None = None,
         font_size_px: int = 17,
         prewarm: bool = True,
+        inject_boundary_ticks: bool = True,
         **plot_kwargs,
     ) -> None:
         super().__init__(context, **plot_kwargs)
@@ -35,12 +36,15 @@ class DearCyFi(dcg.Plot):
 
         self._on_status = on_status
 
+        print('loaded version with inject boundary ticks')
+
         self._time_locator_use_local_time = use_local_time
         self._time_locator_use_24_hour = use_24_hour
         self._time_locator_use_iso8601 = use_iso8601
         self._time_locator_max_density = max_density
         self._time_locator_char_px = char_px
         self._time_locator_font_size_px = font_size_px
+        self._inject_boundary_ticks = inject_boundary_ticks
 
         if font_path is None:
             try:
@@ -135,6 +139,15 @@ class DearCyFi(dcg.Plot):
 
     def get_last_resize_time_format_info(self) -> dict[str, object]:
         return dict(self._last_resize_time_format_info)
+
+    @property
+    def inject_boundary_ticks(self) -> bool:
+        """Whether boundary tick injection at calendar discontinuities is enabled."""
+        return self._inject_boundary_ticks
+
+    @inject_boundary_ticks.setter
+    def inject_boundary_ticks(self, value: bool) -> None:
+        self._inject_boundary_ticks = bool(value)
 
     def _format_debug_text(self) -> str:
         """Build a compact multiline debug string from the last resize info and tick counts."""
@@ -347,6 +360,72 @@ class DearCyFi(dcg.Plot):
             self.horizontal_bars.update_positions(self.X1.max)
             self._set_status(f"Updated {num_bars} horizontal bars")
 
+    def _inject_boundary_ticks_at_discontinuities(
+        self,
+        ticks: list,
+        boundaries,
+        min_time: float,
+        max_time: float,
+        span: float,
+        use_local_time: bool,
+        use_24_hour: bool,
+        use_iso8601: bool,
+    ) -> dict[str, int]:
+        """Inject major ticks at calendar boundaries (year/month/day) within the visible range.
+
+        Maps real timestamps back into collapsed axis coordinates and appends labelled ticks
+        to *ticks* in-place.  Returns a dict mapping each boundary kind to the number of
+        ticks injected.
+
+        Args:
+            ticks: List of Tick objects to append boundary ticks to (modified in-place).
+            boundaries: Time-map object exposing year/month/day_starts_real arrays.
+            min_time: Lower bound of the visible collapsed axis range.
+            max_time: Upper bound of the visible collapsed axis range.
+            span: Visible time span in seconds (used to decide whether to include day boundaries).
+            use_local_time: Format timestamps in local time when True.
+            use_24_hour: Use 24-hour clock format when True.
+            use_iso8601: Use ISO 8601 date format when True.
+        """
+        include_days = (span / 86400.0) <= 60.0
+        boundary_arrays: list[tuple[str, np.ndarray]] = [
+            ("year", boundaries.year_starts_real),
+            ("month", boundaries.month_starts_real),
+        ]
+        if include_days:
+            boundary_arrays.append(("day", boundaries.day_starts_real))
+
+        # Inject additional major ticks at calendar boundaries (year/month/day)
+        # using real timestamps, then map them back into collapsed axis coordinates.
+        _boundary_counts: dict[str, int] = {}
+        for kind, arr in boundary_arrays:
+            if arr.size == 0:
+                continue
+            _kind_count = 0
+            for t_real in arr:
+                x = float(self._gap_manager.time_map.collapse(float(t_real)))
+                if x < min_time or x > max_time:
+                    continue
+                tp = locator_time3.ImPlotTime.from_double(float(t_real))
+                if kind == "year":
+                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
+                elif kind == "month":
+                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
+                else:
+                    # This else statement is suspect for causing excessive tick generation when day boundaries are included.
+                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
+                label = locator_time3.format_datetime(
+                    tp,
+                    spec,
+                    use_local_time=use_local_time,
+                    use_24_hour=use_24_hour,
+                    use_iso8601=use_iso8601,
+                )
+                ticks.append(locator_time3.Tick(pos=x, level=1, major=True, show_label=True, label=label))
+                _kind_count += 1
+            _boundary_counts[kind] = _kind_count
+        return _boundary_counts
+
     def axes_resize_callback(self, sender, target, data) -> None:
         x_axis_info = data[0]
         min_time = float(x_axis_info[0])
@@ -440,46 +519,20 @@ class DearCyFi(dcg.Plot):
 
             ticks = relabeled
 
-            include_days = (span / 86400.0) <= 60.0
-            boundaries: list[tuple[str, np.ndarray]] = [
-                ("year", self._gap_manager.time_map.year_starts_real),
-                ("month", self._gap_manager.time_map.month_starts_real),
-            ]
-            if include_days:
-                boundaries.append(("day", self._gap_manager.time_map.day_starts_real))
-
-            # Inject additional major ticks at calendar boundaries (year/month/day)
-            # using real timestamps, then map them back into collapsed axis coordinates.
-            _boundary_counts: dict[str, int] = {}
-            for kind, arr in boundaries:
-                if arr.size == 0:
-                    continue
-                _kind_count = 0
-                for t_real in arr:
-                    x = float(self._gap_manager.time_map.collapse(float(t_real)))
-                    if x < min_time or x > max_time:
-                        continue
-                    tp = locator_time3.ImPlotTime.from_double(float(t_real))
-                    if kind == "year":
-                        spec = locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
-                    elif kind == "month":
-                        spec = locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
-                    else:
-                        # This else statement is suspect for causing excessive tick generation when day boundaries are included.
-                        spec = locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
-                    label = locator_time3.format_datetime(
-                        tp,
-                        spec,
-                        use_local_time=use_local_time,
-                        use_24_hour=use_24_hour,
-                        use_iso8601=use_iso8601,
-                    )
-                    ticks.append(locator_time3.Tick(pos=x, level=1, major=True, show_label=True, label=label))
-                    _kind_count += 1
-                _boundary_counts[kind] = _kind_count
-            self._last_tick_counts.update({
-                f"boundary_{k}": v for k, v in _boundary_counts.items()
-            })
+            if self._inject_boundary_ticks:
+                _boundary_counts = self._inject_boundary_ticks_at_discontinuities(
+                    ticks=ticks,
+                    boundaries=self._gap_manager.time_map,
+                    min_time=min_time,
+                    max_time=max_time,
+                    span=span,
+                    use_local_time=use_local_time,
+                    use_24_hour=use_24_hour,
+                    use_iso8601=use_iso8601,
+                )
+                self._last_tick_counts.update({
+                    f"boundary_{k}": v for k, v in _boundary_counts.items()
+                })
 
         # Group labels by (rounded) x-position so overlapping major/minor ticks can be
         # merged into a single rendered label entry at that coordinate.
