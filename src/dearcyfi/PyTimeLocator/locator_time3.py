@@ -1117,30 +1117,51 @@ class TimeAxisLocator:
 # -----------------------------
 
 if __name__ == "__main__":
+    from pathlib import Path
+
+    # Try to locate the DearCyGui bundled font for real PIL-based text measurement.
+    _measure = None
+    try:
+        import dearcygui as _dcg
+        _font_path = Path(getattr(_dcg, "__file__", "")).resolve().parent / "lmsans17-regular.otf"
+        if _font_path.exists():
+            _measure = make_pil_text_width_measurer(str(_font_path), 17)
+            print(f"[demo] PIL text measurer enabled: {_font_path}")
+        else:
+            print(f"[demo] Font not found at {_font_path}, using char_px fallback")
+    except Exception as exc:
+        print(f"[demo] PIL measurer unavailable, using char_px fallback (reason: {exc})")
+
+    # Build a TimeAxisLocator so the demo uses the same path as production code.
+    locator = TimeAxisLocator(
+        use_local_time=True,
+        measure_text_width_px=_measure,
+    )
+
     # Choose which demo case to run.
     # 1: one-hour window
     # 2: five-day window starting now
     # 3: five-day window starting at midnight
     # 4: explicit "same tick has level-0 and level-1 major" example
-    example_case = 4
+    example_case = 1
     now = time.time()
 
     match example_case:
         case 1:
-            ticks = locator_time(now, now + 3600, 800, use_local_time=True)
+            ticks = locator(now, now + 3600, 800)
 
         case 2:
-            ticks = locator_time(now, now + 3600 * 24 * 5, 800, use_local_time=True)
+            ticks = locator(now, now + 3600 * 24 * 5, 800)
 
         case 3:
             case3_start = make_time(2024, 0, 1, use_local_time=True).to_double()
             case3_end = make_time(2024, 0, 6, use_local_time=True).to_double()
-            ticks = locator_time(case3_start, case3_end, 800, use_local_time=True)
+            ticks = locator(case3_start, case3_end, 800)
 
         case 4:
             case4_start = make_time(2024, 0, 1, use_local_time=True).to_double()
             case4_end = make_time(2024, 0, 6, use_local_time=True).to_double()
-            ticks = locator_time(case4_start, case4_end, 800, use_local_time=True)
+            ticks = locator(case4_start, case4_end, 800)
 
             levels_by_major_pos: dict[float, set[int]] = {}
             for tick in ticks:
