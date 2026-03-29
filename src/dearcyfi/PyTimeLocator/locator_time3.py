@@ -1184,6 +1184,31 @@ if __name__ == "__main__":
         case _:
             raise ValueError("example_case must be 1, 2, 3, or 4")
     
+    # Print worst-case label widths for each format spec
+    print("\n--- Worst-case label widths ---")
+    #print the entire worst case date in human-readable form
+    print("Worst-case date in human-readable form: 2888-12-22 12:58:58.888888")
+    t_wide = make_time(2888, 11, 22, 12, 58, 58, 888888, use_local_time=True)
+    print(f"Worst-case timestamp: {t_wide}  (2888-12-22 12:58:58.888888)")
+    print(f"PIL measurer: {'enabled' if _measure else 'disabled (using char_px=7.0)'}\n")
+    for label, specs in [
+        ("LEVEL0", TIME_FORMAT_LEVEL0),
+        ("LEVEL1", TIME_FORMAT_LEVEL1),
+        ("LEVEL1_FIRST", TIME_FORMAT_LEVEL1_FIRST),
+    ]:
+        print(f"  {label}:")
+        for i, spec in enumerate(specs):
+            s = format_datetime(t_wide, spec, use_local_time=True, use_24_hour=False, use_iso8601=False)
+            if _measure:
+                w = _measure(s)
+            else:
+                w = len(s) * 7.0
+            unit_name = ("US", "MS", "S", "MIN", "HR", "DAY", "MO", "YR")[i] if i < 8 else str(i)
+            print(f"    [{unit_name:>3}] {w:6.1f}px  \"{s}\"")
+        print()
+
+    print('Print the test case:\n')
+
     # Print a compact view
     for tk in ticks[:25]:
         if tk.show_label:
