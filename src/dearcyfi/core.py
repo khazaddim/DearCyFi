@@ -107,6 +107,10 @@ class DearCyFi(dcg.Plot):
         self.debug_text = dcg.SharedStr(context, value="")
         self._last_tick_counts: dict[str, int] = {}
 
+        self._label_overlap_debug: bool = False
+        self._diag_extents_series = None
+        self._diag_overlaps_series = None
+
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
         self.Y1.label = "Price ($)"
@@ -149,6 +153,24 @@ class DearCyFi(dcg.Plot):
     def inject_boundary_ticks(self, value: bool) -> None:
         self._inject_boundary_ticks = bool(value)
 
+    @property
+    def label_overlap_debug(self) -> bool:
+        """Whether the label-overlap diagnostic overlay is enabled."""
+        return self._label_overlap_debug
+
+    @label_overlap_debug.setter
+    def label_overlap_debug(self, value: bool) -> None:
+        value = bool(value)
+        if value == self._label_overlap_debug:
+            return
+        self._label_overlap_debug = value
+        if value:
+            self._ensure_diag_series()
+        if self._diag_extents_series is not None:
+            self._diag_extents_series.show = value
+        if self._diag_overlaps_series is not None:
+            self._diag_overlaps_series.show = value
+
     def _format_debug_text(self) -> str:
         """Build a compact multiline debug string from the last resize info and tick counts."""
         info = self._last_resize_time_format_info
@@ -175,7 +197,89 @@ class DearCyFi(dcg.Plot):
             lines.append(
                 f"boundaries: yr={tc.get('boundary_year', 0)} mo={tc.get('boundary_month', 0)} day={tc.get('boundary_day', 0)}"
             )
+        if tc.get("overlap_count", 0) > 0:
+            lines.append(
+                f"overlaps: {tc['overlap_count']}  total_width={tc.get('overlap_total_width', 0):.2f}"
+            )
         return "\n".join(lines)
+
+    def _compute_label_extents(
+        self,
+        labels: list[str],
+        coords: list[float],
+        is_major_flags: list[bool],
+        scaling_factor: float,
+    ) -> list[tuple[float, float, bool]]:
+        """Return (x_start, x_end, is_major) for each label using text-width measurement."""
+        measure = getattr(self._time_locator, "measure_text_width_px", None)
+        char_px = self._time_locator_char_px
+        extents: list[tuple[float, float, bool]] = []
+        for label, coord, is_major in zip(labels, coords, is_major_flags):
+            if measure is not None:
+                width_px = measure(label)
+            else:
+                width_px = len(label) * char_px
+            half_w = (width_px * scaling_factor) / 2.0
+            extents.append((coord - half_w, coord + half_w, is_major))
+        return extents
+
+    @staticmethod
+    def _detect_label_overlaps(
+        extents: list[tuple[float, float, bool]],
+    ) -> list[tuple[float, float, int, int]]:
+        """Scan sorted same-lane (level-0) extents for adjacent overlaps.
+
+        Returns (overlap_start, overlap_end, index_a, index_b) for each collision.
+        """
+        level0 = [(i, xs, xe) for i, (xs, xe, is_major) in enumerate(extents) if not is_major]
+        level0.sort(key=lambda t: t[1])
+        overlaps: list[tuple[float, float, int, int]] = []
+        for k in range(len(level0) - 1):
+            i, _, xe_a = level0[k]
+            j, xs_b, xe_b = level0[k + 1]
+            if xe_a > xs_b:
+                overlaps.append((xs_b, min(xe_a, xe_b), i, j))
+        return overlaps
+
+    def _ensure_diag_series(self) -> None:
+        """Lazily create the diagnostic PlotDigital series and configure Y2."""
+        if self._diag_extents_series is not None:
+            return
+        # Configure Y2 as a fixed 0-1 axis with no visible chrome
+        self.Y2.constraint_min = 0.0
+        self.Y2.constraint_max = 1.0
+        self.Y2.lock_min = True
+        self.Y2.lock_max = True
+        self.Y2.no_tick_labels = True
+        self.Y2.no_tick_marks = True
+        self.Y2.no_gridlines = True
+        self.Y2.no_label = True
+        self.Y2.no_side_switch = True
+        self.Y2.no_highlight = True
+        self.Y2.no_menus = True
+
+        y2_axes = (dcg.Axis.X1, dcg.Axis.Y2)
+        empty_x = np.array([], dtype=np.float64)
+        empty_y = np.array([], dtype=np.float64)
+        with self:
+            self._diag_extents_series = dcg.PlotDigital(
+                self.context,
+                X=empty_x,
+                Y=empty_y,
+                label="##diag_extents",
+                axes=y2_axes,
+                no_legend=True,
+                theme=dcg.ThemeColorImPlot(self.context, line=(100, 180, 255, 80)),
+            )
+            self._diag_overlaps_series = dcg.PlotDigital(
+                self.context,
+                X=empty_x,
+                Y=empty_y,
+                label="##diag_overlaps",
+                axes=y2_axes,
+                no_legend=True,
+                theme=dcg.ThemeColorImPlot(self.context, line=(255, 60, 60, 160)),
+            )
 
     def get_time_format_config(self) -> dict[str, object]:
         return {
@@ -585,6 +689,38 @@ class DearCyFi(dcg.Plot):
 
         self._apply_custom_x_labels(labels, coords, majors=majors, no_gridlines=False)
 
+        # --- Label overlap diagnostic overlay ---
+        overlap_count = 0
+        overlap_total_width = 0.0
+        if self._label_overlap_debug and scaling_factor is not None and scaling_factor > 0:
+            self._ensure_diag_series()
+            extents = self._compute_label_extents(labels, coords, majors, scaling_factor)
+            overlaps = self._detect_label_overlaps(extents)
+            overlap_count = len(overlaps)
+            overlap_total_width = sum(oe - os for os, oe, _, _ in overlaps)
+
+            # Build extents step-function arrays (level-0 only)
+            ext_x_parts: list[float] = []
+            ext_y_parts: list[float] = []
+            for xs, xe, is_major in extents:
+                if is_major:
+                    continue
+                ext_x_parts.extend([xs, xe])
+                ext_y_parts.extend([1.0, 0.0])
+
+            self._diag_extents_series.X = np.array(ext_x_parts, dtype=np.float64)
+            self._diag_extents_series.Y = np.array(ext_y_parts, dtype=np.float64)
+
+            # Build overlaps step-function arrays
+            ovl_x_parts: list[float] = []
+            ovl_y_parts: list[float] = []
+            for os, oe, _, _ in overlaps:
+                ovl_x_parts.extend([os, oe])
+                ovl_y_parts.extend([1.0, 0.0])
+
+            self._diag_overlaps_series.X = np.array(ovl_x_parts, dtype=np.float64)
+            self._diag_overlaps_series.Y = np.array(ovl_y_parts, dtype=np.float64)
+
         # Update tick counts for debug overlay
         n_l0 = sum(1 for t in ticks if t.level == 0)
         n_l1 = sum(1 for t in ticks if t.level == 1)
@@ -593,6 +729,8 @@ class DearCyFi(dcg.Plot):
             "level1": n_l1,
             "total": len(ticks),
             "labels_rendered": len(labels),
+            "overlap_count": overlap_count,
+            "overlap_total_width": overlap_total_width,
         }
         self.debug_text.value = self._format_debug_text()
 
