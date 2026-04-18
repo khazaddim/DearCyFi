@@ -170,6 +170,8 @@ class DearCyFi(dcg.Plot):
             self._diag_extents_series.show = value
         if self._diag_overlaps_series is not None:
             self._diag_overlaps_series.show = value
+        # Trigger a resize callback so diagnostic data is computed immediately
+        self.X1.fit()
 
     def _format_debug_text(self) -> str:
         """Build a compact multiline debug string from the last resize info and tick counts."""
@@ -227,16 +229,18 @@ class DearCyFi(dcg.Plot):
     def _detect_label_overlaps(
         extents: list[tuple[float, float, bool]],
     ) -> list[tuple[float, float, int, int]]:
-        """Scan sorted same-lane (level-0) extents for adjacent overlaps.
+        """Scan sorted extents for adjacent overlaps.
 
         Returns (overlap_start, overlap_end, index_a, index_b) for each collision.
         """
-        level0 = [(i, xs, xe) for i, (xs, xe, is_major) in enumerate(extents) if not is_major]
-        level0.sort(key=lambda t: t[1])
+        sorted_entries = sorted(
+            [(i, xs, xe) for i, (xs, xe, _) in enumerate(extents)],
+            key=lambda t: t[1],
+        )
         overlaps: list[tuple[float, float, int, int]] = []
-        for k in range(len(level0) - 1):
-            i, _, xe_a = level0[k]
-            j, xs_b, xe_b = level0[k + 1]
+        for k in range(len(sorted_entries) - 1):
+            i, _, xe_a = sorted_entries[k]
+            j, xs_b, xe_b = sorted_entries[k + 1]
             if xe_a > xs_b:
                 overlaps.append((xs_b, min(xe_a, xe_b), i, j))
         return overlaps
@@ -257,6 +261,7 @@ class DearCyFi(dcg.Plot):
         self.Y2.no_side_switch = True
         self.Y2.no_highlight = True
         self.Y2.no_menus = True
+        self.Y2.enabled = True
 
         y2_axes = (dcg.Axis.X1, dcg.Axis.Y2)
         empty_x = np.array([], dtype=np.float64)
@@ -269,7 +274,7 @@ class DearCyFi(dcg.Plot):
                 label="##diag_extents",
                 axes=y2_axes,
                 no_legend=True,
-                theme=dcg.ThemeColorImPlot(self.context, line=(100, 180, 255, 80)),
+                theme=dcg.ThemeColorImPlot(self.context, fill=(100, 255, 180, 80)),
             )
             self._diag_overlaps_series = dcg.PlotDigital(
                 self.context,
@@ -278,7 +283,7 @@ class DearCyFi(dcg.Plot):
                 label="##diag_overlaps",
                 axes=y2_axes,
                 no_legend=True,
-                theme=dcg.ThemeColorImPlot(self.context, line=(255, 60, 60, 160)),
+                theme=dcg.ThemeColorImPlot(self.context, fill=(255, 60, 60, 160)),
             )
 
     def get_time_format_config(self) -> dict[str, object]:
@@ -699,12 +704,10 @@ class DearCyFi(dcg.Plot):
             overlap_count = len(overlaps)
             overlap_total_width = sum(oe - os for os, oe, _, _ in overlaps)
 
-            # Build extents step-function arrays (level-0 only)
+            # Build extents step-function arrays for all labels
             ext_x_parts: list[float] = []
             ext_y_parts: list[float] = []
-            for xs, xe, is_major in extents:
-                if is_major:
-                    continue
+            for xs, xe, _is_major in extents:
                 ext_x_parts.extend([xs, xe])
                 ext_y_parts.extend([1.0, 0.0])
 
