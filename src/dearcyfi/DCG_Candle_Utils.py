@@ -84,7 +84,13 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._count_offset = count_offset
         # volume item handling
         self._volume_digital_series = None
-        self._volume_kwargs = volume_kwargs or {}
+        self._volume_kwargs = dict(volume_kwargs or {})
+        self._default_volume_theme = dcg.ThemeColorImPlot(
+            context,
+            fill=(75, 140, 240, 110)
+            #line=(75, 140, 240, 200),
+        )
+        self._volume_kwargs.setdefault("theme", self._default_volume_theme)
         try:
             self._volume_digital_series = dcg.PlotDigital(context, X=self._dates, Y=self._volumes, **self._volume_kwargs)
         except Exception as e:
