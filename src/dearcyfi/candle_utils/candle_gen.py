@@ -1,6 +1,55 @@
 import numpy as np
 from datetime import datetime, timezone
 
+
+def _create_candles_and_volume(dates, base_price, volatility, seed, random):
+    """Create OHLC candles and volume series for the provided timestamps."""
+    if not random:
+        np.random.seed(seed)
+
+    changes = np.random.normal(0.001, volatility, len(dates))
+    changes += 0.002  # Upward trend
+
+    closes = np.zeros(len(dates))
+    closes[0] = base_price
+    for i in range(1, len(dates)):
+        closes[i] = closes[i - 1] * (1 + changes[i])
+
+    opens = np.zeros(len(dates))
+    highs = np.zeros(len(dates))
+    lows = np.zeros(len(dates))
+
+    for i in range(len(dates)):
+        if i == 0:
+            opens[i] = base_price * (1 - volatility / 2)
+        else:
+            opens[i] = closes[i - 1] * (1 + np.random.normal(0, volatility / 2))
+        highs[i] = max(opens[i], closes[i]) * (1 + abs(np.random.normal(0, volatility)))
+        lows[i] = min(opens[i], closes[i]) * (1 - abs(np.random.normal(0, volatility)))
+
+    if not random:
+        np.random.seed(seed + 1)  # Different seed for volume
+
+    volume = np.random.uniform(1, 20, len(dates))
+    volume = np.clip(volume, 0, None)  # Ensure no negative volumes
+
+    return opens, highs, lows, closes, volume
+
+
+def _apply_weekend_gaps(dates):
+    """Shift timestamps forward at weekend boundaries to preserve a continuous trading index."""
+    dates = dates.copy()
+    weekdays = np.array([
+        datetime.fromtimestamp(ts, tz=timezone.utc).weekday() for ts in dates
+    ])
+
+    # Weekend starts are rising edges into Saturday/Sunday.
+    weekend_starts = np.where((weekdays[:-1] < 5) & (weekdays[1:] >= 5))[0] + 1
+    for start_idx in weekend_starts:
+        dates[start_idx:] += 2 * 86400  # Shift by 2 days in seconds.
+
+    return dates
+
 def generate_fake_candlestick_data(
     dates=None,
     base_price=150.0,
@@ -61,58 +110,16 @@ def generate_fake_candlestick_data(
         start = int(dt.replace(tzinfo=timezone.utc).timestamp())
         dates = np.array([start + step * i for i in range(length)])
 
-    if not random:
-        np.random.seed(seed)
-    changes = np.random.normal(0.001, volatility, len(dates))
-    changes += 0.002  # Upward trend
-
-    closes = np.zeros(len(dates))
-    closes[0] = base_price
-    for i in range(1, len(dates)):
-        closes[i] = closes[i-1] * (1 + changes[i])
-
-    opens = np.zeros(len(dates))
-    highs = np.zeros(len(dates))
-    lows = np.zeros(len(dates))
-
-    for i in range(len(dates)):
-        if i == 0:
-            opens[i] = base_price * (1 - volatility/2)
-        else:
-            opens[i] = closes[i-1] * (1 + np.random.normal(0, volatility/2))
-        highs[i] = max(opens[i], closes[i]) * (1 + abs(np.random.normal(0, volatility)))
-        lows[i] = min(opens[i], closes[i]) * (1 - abs(np.random.normal(0, volatility)))
-
-    # set the seed for volume generation
-    if not random:
-        np.random.seed(seed + 1)  # Different seed for volume
-
-    # Generate fake volume data
-    volume = np.random.uniform(1, 20, len(dates))
-    volume = np.clip(volume, 0, None)  # Ensure no negative volumes
+    opens, highs, lows, closes, volume = _create_candles_and_volume(
+        dates=dates,
+        base_price=base_price,
+        volatility=volatility,
+        seed=seed,
+        random=random,
+    )
 
     if remove_weekends:
-        # Filter out weekends for any interval
-        #old logic that would just remove weekends for daily data
-        
-        weekdays = np.array([
-            datetime.fromtimestamp(ts, tz=timezone.utc).weekday() for ts in dates
-        ])
-        '''
-        mask = (weekdays != 5) & (weekdays != 6)  # 5=Saturday, 6=Sunday
-        dates = dates[mask]
-        opens = opens[mask]
-        highs = highs[mask]
-        lows = lows[mask]
-        closes = closes[mask]
-        '''
-        # new logic that shift all timestamps after the start of a weekend forward by 2 days
-        # find the indices where weekends start
-        # these will be rising edges in the weekday array
-        weekend_starts = np.where((weekdays[:-1] < 5) & (weekdays[1:] >= 5))[0] + 1
-        # for each weekend start, shift all subsequent timestamps into the future by 2 days
-        for start_idx in weekend_starts:
-            dates[start_idx:] += 2 * 86400  # shift by 2 days in seconds
+        dates = _apply_weekend_gaps(dates)
 
     # Add a continuous index column
     index = np.arange(len(dates))
