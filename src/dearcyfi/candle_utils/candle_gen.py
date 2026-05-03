@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 def _create_candles_and_volume(dates, base_price, volatility, seed, random):
     """Create OHLC candles and volume series for the provided timestamps."""
-    print(f"Generating candles with base_price={base_price}, volatility={volatility}, seed={seed}, random={random}")
     if not random:
         np.random.seed(seed)
 
@@ -76,12 +75,28 @@ def _apply_gaps(dates, gap_types):
 
     # Weekend starts are rising edges into Saturday/Sunday.
     if "weekend" in normalized_gap_types:
-        weekdays = np.array([
-            datetime.fromtimestamp(ts, tz=timezone.utc).weekday() for ts in dates
-        ])
-        weekend_starts = np.where((weekdays[:-1] < 5) & (weekdays[1:] >= 5))[0] + 1
-        for start_idx in weekend_starts:
-            dates[start_idx:] += 2 * 86400  # Shift by 2 days in seconds.
+        shifted_dates = dates.copy()
+        weekend_offset = 0
+        previous_weekday = datetime.fromtimestamp(
+            shifted_dates[0], tz=timezone.utc
+        ).weekday()
+
+        for index in range(1, len(shifted_dates)):
+            shifted_dates[index] = dates[index] + weekend_offset
+            current_weekday = datetime.fromtimestamp(
+                shifted_dates[index], tz=timezone.utc
+            ).weekday()
+
+            if previous_weekday < 5 and current_weekday >= 5:
+                weekend_offset += 2 * 86400
+                shifted_dates[index] = dates[index] + weekend_offset
+                current_weekday = datetime.fromtimestamp(
+                    shifted_dates[index], tz=timezone.utc
+                ).weekday()
+
+            previous_weekday = current_weekday
+
+        dates = shifted_dates
 
     return dates
 
@@ -134,8 +149,9 @@ def generate_fake_candlestick_data(
         When omitted, no gaps are applied and a warning is emitted.
     length : int
         Number of intervals to generate if dates is None.
-    start_date : str
-        Start date in 'YYYY-MM-DD' format (used if dates is None).
+    start_date : str | int | float | datetime
+        Start date as a 'YYYY-MM-DD' string, a UNIX timestamp (int/float),
+        or a datetime object (used if dates is None).
     interval : str
         "weekly", "daily", "hourly", "15min", "5min", or "minute" candles.
 
@@ -152,9 +168,13 @@ def generate_fake_candlestick_data(
     step = _interval_to_seconds(interval)
 
     if dates is None:
-        # Parse the start_date string to a datetime object
-        dt = datetime.strptime(start_date, "%Y-%m-%d")
-        start = int(dt.replace(tzinfo=timezone.utc).timestamp())
+        if isinstance(start_date, (int, float)):
+            start = int(start_date)
+        elif isinstance(start_date, datetime):
+            start = int(start_date.replace(tzinfo=timezone.utc).timestamp())
+        else:
+            dt = datetime.strptime(start_date, "%Y-%m-%d")
+            start = int(dt.replace(tzinfo=timezone.utc).timestamp())
         dates = np.array([start + step * i for i in range(length)])
 
     opens, highs, lows, closes, volume = _create_candles_and_volume(
@@ -189,12 +209,87 @@ def generate_fake_candlestick_data(
     return dates, opens, highs, lows, closes, index, volume
 
 if __name__ == "__main__":
-    # Example usage of the function
-    dates, opens, highs, lows, closes, index, volume = generate_fake_candlestick_data()
-    print("Dates:", dates)
-    print("Opens:", opens)
-    print("Highs:", highs)
-    print("Lows:", lows)
-    print("Closes:", closes)
-    print("Index:", index)
-    print("Volume:", volume)
+    from datetime import datetime, timezone
+
+    ref_str = "2024-08-05"
+    ref_dt  = datetime(2024, 8, 5, tzinfo=timezone.utc)
+    ref_ts  = int(ref_dt.timestamp())  # 1722816000
+
+    print(f"Reference timestamp: {ref_ts}  ({ref_str})\n")
+
+    # --- start_date input types all produce the same first timestamp ---
+    dates_str, *_ = generate_fake_candlestick_data(
+        start_date=ref_str, length=3, gap_types=[], interval="daily"
+    )
+    dates_int, *_ = generate_fake_candlestick_data(
+        start_date=ref_ts, length=3, gap_types=[], interval="daily"
+    )
+    dates_dt, *_ = generate_fake_candlestick_data(
+        start_date=ref_dt, length=3, gap_types=[], interval="daily"
+    )
+    assert dates_str[0] == dates_int[0] == dates_dt[0], (
+        f"start_date type mismatch: str={dates_str[0]}, int={dates_int[0]}, dt={dates_dt[0]}"
+    )
+    print(f"str/int/datetime start_date -> same timestamp {dates_str[0]}  ✓")
+
+    # --- output arrays all have the requested length ---
+    N = 50
+    result = generate_fake_candlestick_data(start_date=ref_str, length=N, gap_types=[], interval="hourly")
+    dates_out, opens_out, highs_out, lows_out, closes_out, index_out, volume_out = result
+    for name, arr in zip(
+        ("dates", "opens", "highs", "lows", "closes", "index", "volume"),
+        result,
+    ):
+        assert len(arr) == N, f"{name}: expected {N} elements, got {len(arr)}"
+    print(f"All output arrays have length {N}  ✓")
+
+    # --- interval step sizes ---
+    interval_steps = {
+        "weekly": 7 * 86400,
+        "daily":  86400,
+        "hourly": 3600,
+        "15min":  15 * 60,
+        "5min":   5 * 60,
+        "minute": 60,
+    }
+    for iv, expected_step in interval_steps.items():
+        d, *_ = generate_fake_candlestick_data(
+            start_date=ref_str, length=5, gap_types=[], interval=iv
+        )
+        actual_step = int(d[1] - d[0])
+        assert actual_step == expected_step, (
+            f"interval '{iv}': expected step {expected_step}s, got {actual_step}s"
+        )
+        print(f"interval '{iv}' step = {expected_step}s  ✓")
+
+    # --- weekend gap removes Sat/Sun from output ---
+    dates_wknd, *_ = generate_fake_candlestick_data(
+        start_date=ref_str, length=14, gap_types=["weekend"], interval="daily"
+    )
+    weekdays = [datetime.fromtimestamp(ts, tz=timezone.utc).weekday() for ts in dates_wknd]
+    assert all(wd < 5 for wd in weekdays), f"Weekend gap left Sat/Sun in output: {weekdays}"
+    print("Weekend gap: no Sat/Sun in output  ✓")
+
+    # --- pre-built dates array bypasses start_date ---
+    custom_dates = np.array([1_000_000, 1_000_060, 1_000_120], dtype=np.float64)
+    d_passthrough, *_ = generate_fake_candlestick_data(
+        dates=custom_dates, gap_types=[], start_date="1999-01-01"
+    )
+    assert np.array_equal(d_passthrough, custom_dates), "Pre-built dates array was not passed through unchanged"
+    print("Pre-built dates passthrough  ✓")
+
+    # --- invalid gap_type raises ValueError ---
+    try:
+        generate_fake_candlestick_data(start_date=ref_str, gap_types=["bogus"], length=5)
+        assert False, "Expected ValueError for invalid gap_type"
+    except ValueError:
+        print("Invalid gap_type raises ValueError  ✓")
+
+    # --- invalid interval raises ValueError ---
+    try:
+        generate_fake_candlestick_data(start_date=ref_str, gap_types=[], interval="monthly", length=5)
+        assert False, "Expected ValueError for invalid interval"
+    except ValueError:
+        print("Invalid interval raises ValueError  ✓")
+
+    print("\nAll tests passed. ✓")
