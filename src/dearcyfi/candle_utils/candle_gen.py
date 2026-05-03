@@ -119,6 +119,36 @@ def _interval_to_seconds(interval):
             "interval must be 'weekly', 'daily', 'hourly', '15min', '5min', or 'minute'"
         ) from exc
 
+
+def _start_date_to_timestamp(start_date):
+    """Normalize supported start_date inputs to a UTC Unix timestamp."""
+    if isinstance(start_date, (int, float)):
+        return int(start_date)
+
+    if isinstance(start_date, datetime):
+        return int(start_date.replace(tzinfo=timezone.utc).timestamp())
+
+    normalized_start_date = str(start_date).strip()
+    supported_formats = (
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+    )
+    for date_format in supported_formats:
+        try:
+            parsed_start_date = datetime.strptime(normalized_start_date, date_format)
+            return int(parsed_start_date.replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+
+    raise ValueError(
+        "start_date must be a Unix timestamp, datetime, or a string in "
+        "'YYYY-MM-DD', 'YYYY-MM-DD HH:MM', 'YYYY-MM-DD HH:MM:SS', "
+        "'YYYY-MM-DDTHH:MM', or 'YYYY-MM-DDTHH:MM:SS' format"
+    )
+
 def generate_fake_candlestick_data(
     dates=None,
     base_price=150.0,
@@ -151,7 +181,8 @@ def generate_fake_candlestick_data(
         Number of intervals to generate if dates is None.
     start_date : str | int | float | datetime
         Start date as a 'YYYY-MM-DD' string, a UNIX timestamp (int/float),
-        or a datetime object (used if dates is None).
+        a datetime object, or a datetime string such as 'YYYY-MM-DD HH:MM'
+        (used if dates is None).
     interval : str
         "weekly", "daily", "hourly", "15min", "5min", or "minute" candles.
 
@@ -168,13 +199,7 @@ def generate_fake_candlestick_data(
     step = _interval_to_seconds(interval)
 
     if dates is None:
-        if isinstance(start_date, (int, float)):
-            start = int(start_date)
-        elif isinstance(start_date, datetime):
-            start = int(start_date.replace(tzinfo=timezone.utc).timestamp())
-        else:
-            dt = datetime.strptime(start_date, "%Y-%m-%d")
-            start = int(dt.replace(tzinfo=timezone.utc).timestamp())
+        start = _start_date_to_timestamp(start_date)
         dates = np.array([start + step * i for i in range(length)])
 
     opens, highs, lows, closes, volume = _create_candles_and_volume(

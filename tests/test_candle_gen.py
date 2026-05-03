@@ -27,6 +27,9 @@ from dearcyfi.candle_utils.candle_gen import generate_fake_candlestick_data
 REFERENCE_DATE_STR = "2024-08-05"
 REFERENCE_DATE_DT = datetime(2024, 8, 5, tzinfo=timezone.utc)
 REFERENCE_DATE_TS = int(REFERENCE_DATE_DT.timestamp())
+REFERENCE_DATETIME_STR = "2024-08-05 09:30"
+REFERENCE_DATETIME_DT = datetime(2024, 8, 5, 9, 30, tzinfo=timezone.utc)
+REFERENCE_DATETIME_TS = int(REFERENCE_DATETIME_DT.timestamp())
 
 
 def test_start_date_overloads_produce_same_first_timestamp():
@@ -47,6 +50,29 @@ def test_start_date_overloads_produce_same_first_timestamp():
         length=3,
         gap_types=[],
         interval="daily",
+    )
+
+    assert dates_str[0] == dates_int[0] == dates_dt[0]
+
+
+def test_timed_start_date_overloads_produce_same_first_timestamp():
+    dates_str, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATETIME_STR,
+        length=3,
+        gap_types=[],
+        interval="hourly",
+    )
+    dates_int, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATETIME_TS,
+        length=3,
+        gap_types=[],
+        interval="hourly",
+    )
+    dates_dt, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATETIME_DT,
+        length=3,
+        gap_types=[],
+        interval="hourly",
     )
 
     assert dates_str[0] == dates_int[0] == dates_dt[0]
