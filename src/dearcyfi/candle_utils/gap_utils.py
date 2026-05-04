@@ -473,14 +473,16 @@ class GapCollapseManager:
         use_local_time: bool,
         debug: bool = True,
     ) -> np.ndarray:
-        """Vectorized gap-collapsing implementation (legacy behavior).
+        """Vectorized gap-collapsing implementation.
 
-        This matches the older vectorized approach that applies all gap shifts
-        in a single NumPy pass. It removes the full gap delta (stop - start)
-        for each detected gap, without preserving a base_step.
+        This matches collapse_dates while applying each gap shift with NumPy masks.
+        It removes only (gap_delta - base_step), preserving one normal interval
+        between the last sample before a gap and the first sample after it.
         """
         orig_dates = np.array(dates, copy=True, dtype=float)
         self.dates_real = np.array(orig_dates, copy=True, dtype=float)
+
+        base_step = self._compute_base_step(orig_dates)
 
         gaps_n_chunks = self.find_gaps_and_chunks(orig_dates)
         if debug:
@@ -503,11 +505,15 @@ class GapCollapseManager:
                     print(f"Skipping malformed gap item: {item}")
                 continue
 
-            gap_size = float(stop - start)
-            mask = orig_dates > float(start)
-            total_shift[mask] += gap_size
+            gap_delta = float(stop - start)
+            remove = max(0.0, gap_delta - base_step)
+            mask = orig_dates >= float(stop)
+            total_shift[mask] += remove
             if debug:
-                print(f"Will collapse gap from {start} to {stop}, size {gap_size} seconds.")
+                print(
+                    f"Will collapse gap from {start} to {stop}, remove {remove} seconds "
+                    f"(delta={gap_delta}, base={base_step})."
+                )
 
         collapsed_dates = orig_dates - total_shift
 

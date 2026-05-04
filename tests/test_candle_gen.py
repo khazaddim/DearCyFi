@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from dearcyfi.candle_utils.candle_gen import generate_fake_candlestick_data
+from dearcyfi.candle_utils.gap_utils import GapCollapseManager
 
 
 REFERENCE_DATE_STR = "2024-08-05"
@@ -127,6 +128,41 @@ def test_weekend_gap_daily_output_contains_no_weekend_dates():
     ]
 
     assert all(weekday < 5 for weekday in weekdays)
+
+
+def test_weekend_gap_daily_output_is_unique_and_increasing():
+    dates, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATE_STR,
+        length=60,
+        gap_types=["weekend"],
+        interval="daily",
+    )
+
+    assert np.all(np.diff(dates) > 0)
+    assert np.unique(dates).size == dates.size
+
+
+def test_weekend_gap_daily_collapse_outputs_are_unique():
+    dates, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATE_STR,
+        length=60,
+        gap_types=["weekend"],
+        interval="daily",
+    )
+
+    manager = GapCollapseManager()
+    collapsed_dates = manager.collapse_dates(dates, use_local_time=False, debug=False)
+
+    vectorized_manager = GapCollapseManager()
+    vectorized_dates = vectorized_manager.collapse_dates_vectorized(
+        dates,
+        use_local_time=False,
+        debug=False,
+    )
+
+    assert np.unique(collapsed_dates).size == collapsed_dates.size
+    assert np.unique(vectorized_dates).size == vectorized_dates.size
+    np.testing.assert_array_equal(vectorized_dates, collapsed_dates)
 
 
 def test_prebuilt_dates_bypass_start_date_generation():
