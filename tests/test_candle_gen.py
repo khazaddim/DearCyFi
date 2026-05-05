@@ -23,6 +23,7 @@ import pytest
 
 from dearcyfi.candle_utils.candle_gen import generate_fake_candlestick_data
 from dearcyfi.candle_utils.gap_utils import GapCollapseManager
+from dearcyfi.DCG_Candle_Utils import _select_auto_tooltip_time_format
 
 
 REFERENCE_DATE_STR = "2024-08-05"
@@ -112,6 +113,27 @@ def test_interval_step_sizes(interval, expected_step):
     )
 
     assert int(dates[1] - dates[0]) == expected_step
+
+
+@pytest.mark.parametrize(
+    ("interval", "expected_format"),
+    [
+        ("weekly", "%Y-%m-%d"),
+        ("daily", "%Y-%m-%d"),
+        ("hourly", "%Y-%m-%d %I:%M %p"),
+        ("15min", "%Y-%m-%d %I:%M %p"),
+        ("5min", "%Y-%m-%d %I:%M %p"),
+    ],
+)
+def test_auto_tooltip_formatter_selects_cadence_format(interval, expected_format):
+    dates, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATETIME_STR,
+        length=20,
+        gap_types=[],
+        interval=interval,
+    )
+
+    assert _select_auto_tooltip_time_format(dates) == expected_format
 
 
 def test_weekend_gap_daily_output_contains_no_weekend_dates():

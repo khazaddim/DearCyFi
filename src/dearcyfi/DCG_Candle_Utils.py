@@ -1,6 +1,47 @@
 import datetime
 import dearcygui as dcg
+import numpy as np
 from collections.abc import Sized
+
+
+_AUTO_TOOLTIP_FORMATS: tuple[tuple[float, str], ...] = (
+    (7 * 86400, "%Y-%m-%d"),
+    (86400, "%Y-%m-%d"),
+    (3600, "%Y-%m-%d %I:%M %p"),
+    (15 * 60, "%Y-%m-%d %I:%M %p"),
+    (5 * 60, "%Y-%m-%d %I:%M %p"),
+    (60, "%Y-%m-%d %I:%M %p"),
+)
+_AUTO_TOOLTIP_FALLBACK_FORMAT = "%Y-%m-%d %I:%M:%S %p"
+
+
+def _median_candle_delta_seconds(dates: Sized) -> float | None:
+    values = np.asarray(dates, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size < 2:
+        return None
+
+    deltas = np.diff(np.sort(values))
+    deltas = deltas[np.isfinite(deltas) & (deltas > 0)]
+    if deltas.size == 0:
+        return None
+    return float(np.median(deltas))
+
+
+def _select_auto_tooltip_time_format(dates: Sized) -> str:
+    median_delta = _median_candle_delta_seconds(dates)
+    if median_delta is None:
+        return _AUTO_TOOLTIP_FALLBACK_FORMAT
+
+    for cadence_seconds, format_string in _AUTO_TOOLTIP_FORMATS:
+        if median_delta >= cadence_seconds * 0.75:
+            return format_string
+    return _AUTO_TOOLTIP_FALLBACK_FORMAT
+
+
+def _make_auto_tooltip_time_formatter(dates: Sized):
+    format_string = _select_auto_tooltip_time_format(dates)
+    return lambda timestamp: datetime.datetime.fromtimestamp(timestamp).strftime(format_string).lower()
 
 class PlotCandleStick(dcg.DrawInPlot):
     """
@@ -23,6 +64,7 @@ class PlotCandleStick(dcg.DrawInPlot):
 
     Args:
         dates (np.ndarray): x-axis values
+        source_dates (np.ndarray, optional): original timestamps used for labels/tooltips
         opens (np.ndarray): open values
         closes (np.ndarray): close values 
         lows (np.ndarray): low values
@@ -37,12 +79,14 @@ class PlotCandleStick(dcg.DrawInPlot):
         bear_color (color, optional): color of the candlestick when the close is lower than the open
         weight (float, optional): Candle width as a percentage of the distance between two dates
         tooltip (bool, optional): whether to show a tooltip on hover
-        time_formatter (callback, optional): callback that takes a date and returns a string
+        time_formatter (callback | "auto", optional): callback that takes a date and returns a string,
+            or "auto" to choose a timestamp format from the median candle interval
     """
     def __init__(self,
                  context : dcg.Context,
                  no_legend=False,
                  dates: Sized = [],
+                 source_dates: Sized | None = None,
                  opens: Sized = [],
                  closes: Sized = [],
                  lows: Sized = [],
@@ -65,6 +109,8 @@ class PlotCandleStick(dcg.DrawInPlot):
         # normalize volumes default
         if volumes is None:
             volumes = []
+        if source_dates is None:
+            source_dates = dates
         # normalize time_counts default
         if time_counts is None:
             time_counts = []
@@ -72,8 +118,11 @@ class PlotCandleStick(dcg.DrawInPlot):
         if len(dates) != len(opens) or len(dates) != len(closes) \
            or len(dates) != len(lows) or len(dates) != len(highs):
             raise ValueError("dates, opens, closes, lows, highs must be of same length")
+        if len(source_dates) != len(dates):
+            raise ValueError("source_dates must be the same length as dates")
         # Same to local variables
         self._dates = dates
+        self._source_dates = source_dates
         self._opens = opens
         self._closes = closes
         self._lows = lows
@@ -105,12 +154,23 @@ class PlotCandleStick(dcg.DrawInPlot):
         # Validate and normalize volume data if needed
         self._normalize_volumes_if_needed()
 
-        self._time_formatter = time_formatter
-        if time_formatter is None:
-            # use datetime:
-            self._time_formatter = lambda x: datetime.datetime.fromtimestamp(x).strftime('%Y-%m-%d %H:%M:%S')
+        self._time_formatter_input = time_formatter
+        self._refresh_time_formatter()
 
         self.render()
+
+
+    def _refresh_time_formatter(self) -> None:
+        if self._time_formatter_input is None:
+            self._time_formatter = lambda timestamp: datetime.datetime.fromtimestamp(timestamp).strftime(_AUTO_TOOLTIP_FALLBACK_FORMAT).lower()
+        elif isinstance(self._time_formatter_input, str):
+            if self._time_formatter_input.strip().lower() != "auto":
+                raise ValueError("time_formatter string values must be 'auto'")
+            self._time_formatter = _make_auto_tooltip_time_formatter(self._source_dates)
+        elif callable(self._time_formatter_input):
+            self._time_formatter = self._time_formatter_input
+        else:
+            raise TypeError("time_formatter must be callable, 'auto', or None")
 
 
     def render(self) -> None:
@@ -132,7 +192,7 @@ class PlotCandleStick(dcg.DrawInPlot):
                     dcg.DrawInvisibleButton(self.context, button=0,
                                             p1=(open_pos[0], low_pos[1]),
                                             p2=(close_pos[0], high_pos[1]),
-                                            user_data=(self._dates[i], self._opens[i],
+                                            user_data=(self._source_dates[i], self._opens[i],
                                                        self._closes[i], self._lows[i],
                                                        self._highs[i]))
                 )
@@ -172,13 +232,13 @@ class PlotCandleStick(dcg.DrawInPlot):
             with dcg.utils.TemporaryTooltip(self.context, target=target,
                                             parent=self.parent.parent):
                 dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
-                dcg.Text(self.context, value=f"Open: {data[1]}")
-                dcg.Text(self.context, value=f"Close: {data[2]}")
-                dcg.Text(self.context, value=f"Low: {data[3]}")
-                dcg.Text(self.context, value=f"High: {data[4]}")
+                dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
+                dcg.Text(self.context, value=f"Close: {data[2]:.2f}")
+                dcg.Text(self.context, value=f"Low: {data[3]:.2f}")
+                dcg.Text(self.context, value=f"High: {data[4]:.2f}")
 
 
-    def update_all(self, dates, opens, closes, lows, highs, volumes, time_counts=None):
+    def update_all(self, dates, opens, closes, lows, highs, volumes, time_counts=None, source_dates=None):
         """Set all arrays at once and re-render once.
 
         Raises:
@@ -187,14 +247,20 @@ class PlotCandleStick(dcg.DrawInPlot):
         if len(dates) != len(opens) or len(dates) != len(closes) \
         or len(dates) != len(lows) or len(dates) != len(highs):
             raise ValueError("dates, opens, closes, lows, highs must be of same length")
+        if source_dates is None:
+            source_dates = dates
+        if len(source_dates) != len(dates):
+            raise ValueError("source_dates must be the same length as dates")
 
         # assign all at once to avoid multiple render calls
         self._dates = dates
+        self._source_dates = source_dates
         self._opens = opens
         self._closes = closes
         self._lows = lows
         self._highs = highs
         self._volumes = volumes
+        self._refresh_time_formatter()
         if time_counts is not None:
             self._time_counts = time_counts
             self._validate_time_counts()
@@ -210,10 +276,12 @@ class PlotCandleStick(dcg.DrawInPlot):
         self.render()
 
     # helper to apply partial updates and validate once
-    def update(self, dates=None, opens=None, closes=None, lows=None, highs=None, volumes=None, time_counts=None):
+    def update(self, dates=None, opens=None, closes=None, lows=None, highs=None, volumes=None, time_counts=None, source_dates=None):
         """Update one or more series and re-render once. Validates lengths."""
         if dates is not None:
             self._dates = dates
+        if source_dates is not None:
+            self._source_dates = source_dates
         if opens is not None:
             self._opens = opens
         if closes is not None:
@@ -226,6 +294,8 @@ class PlotCandleStick(dcg.DrawInPlot):
             self._volumes = volumes
         if time_counts is not None:
             self._time_counts = time_counts
+
+        self._refresh_time_formatter()
 
         self._validate_lengths()
         self._validate_time_counts()
@@ -240,8 +310,8 @@ class PlotCandleStick(dcg.DrawInPlot):
 
     def _validate_lengths(self):
         """Ensure that no arrays are empty and are not None."""
-        series_names = ['dates', 'opens', 'closes', 'lows', 'highs', 'volumes']
-        arrays = [self._dates, self._opens, self._closes, self._lows, self._highs, self._volumes]
+        series_names = ['dates', 'source_dates', 'opens', 'closes', 'lows', 'highs', 'volumes']
+        arrays = [self._dates, self._source_dates, self._opens, self._closes, self._lows, self._highs, self._volumes]
         
         empty_series = []
         for name, arr in zip(series_names, arrays):
@@ -367,6 +437,17 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._dates = value
         self._validate_lengths()
         self._volume_digital_series.X = self._dates
+        self.render()
+
+    @property
+    def source_dates(self):
+        return self._source_dates
+
+    @source_dates.setter
+    def source_dates(self, value):
+        self._source_dates = value
+        self._refresh_time_formatter()
+        self._validate_lengths()
         self.render()
 
     @property

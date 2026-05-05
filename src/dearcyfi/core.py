@@ -331,13 +331,14 @@ class DearCyFi(dcg.Plot):
         self._gap_manager.reset(self.dates)
 
         if time_formatter is None:
-            time_formatter = lambda x: datetime.fromtimestamp(x).strftime("%b %d")
+            time_formatter = "auto"
 
         if self.candlestick_plot is None:
             with self:
                 self.candlestick_plot = PlotCandleStick(
                     self.context,
                     dates=self.dates,
+                    source_dates=self.dates,
                     opens=self.opens,
                     closes=self.closes,
                     lows=self.lows,
@@ -351,6 +352,7 @@ class DearCyFi(dcg.Plot):
         else:
             self.candlestick_plot.update_all(
                 dates=self.dates,
+                source_dates=self.dates,
                 opens=self.opens,
                 closes=self.closes,
                 lows=self.lows,
