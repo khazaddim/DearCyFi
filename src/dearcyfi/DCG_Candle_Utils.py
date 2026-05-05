@@ -3,7 +3,9 @@ import dearcygui as dcg
 import numpy as np
 from collections.abc import Sized
 
-
+# Auto tooltip formats are checked from coarsest to finest cadence. The seconds
+# values are canonical candle intervals used as tolerant thresholds, not exact
+# matches, so irregular market gaps do not usually change the selected format.
 _AUTO_TOOLTIP_FORMATS: tuple[tuple[float, str], ...] = (
     (7 * 86400, "%Y-%m-%d"),
     (86400, "%Y-%m-%d"),
@@ -34,6 +36,8 @@ def _select_auto_tooltip_time_format(dates: Sized) -> str:
         return _AUTO_TOOLTIP_FALLBACK_FORMAT
 
     for cadence_seconds, format_string in _AUTO_TOOLTIP_FORMATS:
+        # Treat each cadence as a range by accepting intervals within 75% of it;
+        # larger cadences have already been checked earlier in the table.
         if median_delta >= cadence_seconds * 0.75:
             return format_string
     return _AUTO_TOOLTIP_FALLBACK_FORMAT
