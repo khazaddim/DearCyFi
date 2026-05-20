@@ -108,8 +108,10 @@ class DearCyFi(dcg.Plot):
         self._last_tick_counts: dict[str, int] = {}
 
         self._label_overlap_debug: bool = False
+        self._boundary_tick_debug: bool = False
         self._diag_extents_series = None
         self._diag_overlaps_series = None
+        self._diag_boundary_ticks_series = None
 
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
@@ -152,6 +154,7 @@ class DearCyFi(dcg.Plot):
     @inject_boundary_ticks.setter
     def inject_boundary_ticks(self, value: bool) -> None:
         self._inject_boundary_ticks = bool(value)
+        self.X1.fit()
 
     @property
     def label_overlap_debug(self) -> bool:
@@ -171,6 +174,23 @@ class DearCyFi(dcg.Plot):
         if self._diag_overlaps_series is not None:
             self._diag_overlaps_series.show = value
         # Trigger a resize callback so diagnostic data is computed immediately
+        self.X1.fit()
+
+    @property
+    def boundary_tick_debug(self) -> bool:
+        """Whether the injected-boundary-tick diagnostic overlay is enabled."""
+        return self._boundary_tick_debug
+
+    @boundary_tick_debug.setter
+    def boundary_tick_debug(self, value: bool) -> None:
+        value = bool(value)
+        if value == self._boundary_tick_debug:
+            return
+        self._boundary_tick_debug = value
+        if value:
+            self._ensure_diag_series()
+        if self._diag_boundary_ticks_series is not None:
+            self._diag_boundary_ticks_series.show = value
         self.X1.fit()
 
     def _format_debug_text(self) -> str:
@@ -199,6 +219,8 @@ class DearCyFi(dcg.Plot):
             lines.append(
                 f"boundaries: yr={tc.get('boundary_year', 0)} mo={tc.get('boundary_month', 0)} day={tc.get('boundary_day', 0)}"
             )
+        if tc.get("injected_boundary_ticks", 0) > 0:
+            lines.append(f"injected_boundaries={tc['injected_boundary_ticks']}")
         if tc.get("overlap_count", 0) > 0:
             lines.append(
                 f"overlaps: {tc['overlap_count']}  total_width={tc.get('overlap_total_width', 0):.2f}"
@@ -247,7 +269,11 @@ class DearCyFi(dcg.Plot):
 
     def _ensure_diag_series(self) -> None:
         """Lazily create the diagnostic PlotDigital series and configure Y2."""
-        if self._diag_extents_series is not None:
+        if (
+            self._diag_extents_series is not None
+            and self._diag_overlaps_series is not None
+            and self._diag_boundary_ticks_series is not None
+        ):
             return
         # Configure Y2 as a fixed 0-1 axis with no visible chrome
         self.Y2.constraint_min = 0.0
@@ -267,24 +293,40 @@ class DearCyFi(dcg.Plot):
         empty_x = np.array([], dtype=np.float64)
         empty_y = np.array([], dtype=np.float64)
         with self:
-            self._diag_extents_series = dcg.PlotDigital(
-                self.context,
-                X=empty_x,
-                Y=empty_y,
-                label="##diag_extents",
-                axes=y2_axes,
-                no_legend=True,
-                theme=dcg.ThemeColorImPlot(self.context, fill=(100, 255, 180, 80)),
-            )
-            self._diag_overlaps_series = dcg.PlotDigital(
-                self.context,
-                X=empty_x,
-                Y=empty_y,
-                label="##diag_overlaps",
-                axes=y2_axes,
-                no_legend=True,
-                theme=dcg.ThemeColorImPlot(self.context, fill=(255, 60, 60, 160)),
-            )
+            if self._diag_extents_series is None:
+                self._diag_extents_series = dcg.PlotDigital(
+                    self.context,
+                    X=empty_x,
+                    Y=empty_y,
+                    label="##diag_extents",
+                    axes=y2_axes,
+                    no_legend=True,
+                    theme=dcg.ThemeColorImPlot(self.context, fill=(100, 255, 180, 80)),
+                )
+            if self._diag_overlaps_series is None:
+                self._diag_overlaps_series = dcg.PlotDigital(
+                    self.context,
+                    X=empty_x,
+                    Y=empty_y,
+                    label="##diag_overlaps",
+                    axes=y2_axes,
+                    no_legend=True,
+                    theme=dcg.ThemeColorImPlot(self.context, fill=(255, 60, 60, 160)),
+                )
+            if self._diag_boundary_ticks_series is None:
+                self._diag_boundary_ticks_series = dcg.PlotDigital(
+                    self.context,
+                    X=empty_x,
+                    Y=empty_y,
+                    label="##diag_boundary_ticks",
+                    axes=y2_axes,
+                    no_legend=True,
+                    theme=dcg.ThemeColorImPlot(self.context, fill=(255, 190, 40, 180)),
+                )
+
+        self._diag_extents_series.show = self._label_overlap_debug
+        self._diag_overlaps_series.show = self._label_overlap_debug
+        self._diag_boundary_ticks_series.show = self._boundary_tick_debug
 
     def get_time_format_config(self) -> dict[str, object]:
         return {
@@ -478,15 +520,20 @@ class DearCyFi(dcg.Plot):
         min_time: float,
         max_time: float,
         span: float,
+        unit0: int,
+        unit1: int,
         use_local_time: bool,
         use_24_hour: bool,
         use_iso8601: bool,
+        injected_positions: list[float] | None = None,
     ) -> dict[str, int]:
         """Inject major ticks at calendar boundaries (year/month/day) within the visible range.
 
         Maps real timestamps back into collapsed axis coordinates and appends labelled ticks
         to *ticks* in-place.  Returns a dict mapping each boundary kind to the number of
-        ticks injected.
+        ticks injected. Boundary injection supplements the locator only when the current
+        zoom level is finer than the boundary being injected, and it skips positions that
+        already have visible labels.
 
         Args:
             ticks: List of Tick objects to append boundary ticks to (modified in-place).
@@ -494,21 +541,31 @@ class DearCyFi(dcg.Plot):
             min_time: Lower bound of the visible collapsed axis range.
             max_time: Upper bound of the visible collapsed axis range.
             span: Visible time span in seconds (used to decide whether to include day boundaries).
+            unit0: Current fine-grained locator unit.
+            unit1: Current coarse locator boundary unit.
             use_local_time: Format timestamps in local time when True.
             use_24_hour: Use 24-hour clock format when True.
             use_iso8601: Use ISO 8601 date format when True.
+            injected_positions: Optional list populated with collapsed x-positions
+                for ticks that were actually injected.
         """
-        include_days = (span / 86400.0) <= 60.0
-        boundary_arrays: list[tuple[str, np.ndarray]] = [
-            ("year", boundaries.year_starts_real),
-            ("month", boundaries.month_starts_real),
-        ]
-        if include_days:
+        boundary_arrays: list[tuple[str, np.ndarray]] = []
+
+        if unit1 < locator_time3.TIME_YR:
+            boundary_arrays.append(("year", boundaries.year_starts_real))
+        if unit1 < locator_time3.TIME_MO:
+            boundary_arrays.append(("month", boundaries.month_starts_real))
+        if unit0 < locator_time3.TIME_DAY and (span / 86400.0) <= 60.0:
             boundary_arrays.append(("day", boundaries.day_starts_real))
 
         # Inject additional major ticks at calendar boundaries (year/month/day)
         # using real timestamps, then map them back into collapsed axis coordinates.
         _boundary_counts: dict[str, int] = {}
+        occupied_positions = {
+            int(round(float(t.pos)))
+            for t in ticks
+            if bool(getattr(t, "show_label", False)) and getattr(t, "label", None) is not None
+        }
         for kind, arr in boundary_arrays:
             if arr.size == 0:
                 continue
@@ -517,13 +574,15 @@ class DearCyFi(dcg.Plot):
                 x = float(self._gap_manager.time_map.collapse(float(t_real)))
                 if x < min_time or x > max_time:
                     continue
+                position_key = int(round(x))
+                if position_key in occupied_positions:
+                    continue
                 tp = locator_time3.ImPlotTime.from_double(float(t_real))
                 if kind == "year":
                     spec = locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
                 elif kind == "month":
                     spec = locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
                 else:
-                    # This else statement is suspect for causing excessive tick generation when day boundaries are included.
                     spec = locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
                 label = locator_time3.format_datetime(
                     tp,
@@ -533,6 +592,9 @@ class DearCyFi(dcg.Plot):
                     use_iso8601=use_iso8601,
                 )
                 ticks.append(locator_time3.Tick(pos=x, level=1, major=True, show_label=True, label=label))
+                if injected_positions is not None:
+                    injected_positions.append(x)
+                occupied_positions.add(position_key)
                 _kind_count += 1
             _boundary_counts[kind] = _kind_count
         return _boundary_counts
@@ -573,6 +635,9 @@ class DearCyFi(dcg.Plot):
         }
 
         ticks = self._time_locator(min_time, max_time, pixels)
+
+        boundary_counts: dict[str, int] = {}
+        injected_boundary_positions: list[float] = []
 
         if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
             use_local_time = bool(getattr(self._time_locator, "use_local_time", True))
@@ -631,19 +696,19 @@ class DearCyFi(dcg.Plot):
             ticks = relabeled
 
             if self._inject_boundary_ticks:
-                _boundary_counts = self._inject_boundary_ticks_at_discontinuities(
+                boundary_counts = self._inject_boundary_ticks_at_discontinuities(
                     ticks=ticks,
                     boundaries=self._gap_manager.time_map,
                     min_time=min_time,
                     max_time=max_time,
                     span=span,
+                    unit0=unit0,
+                    unit1=unit1,
                     use_local_time=use_local_time,
                     use_24_hour=use_24_hour,
                     use_iso8601=use_iso8601,
+                    injected_positions=injected_boundary_positions,
                 )
-                self._last_tick_counts.update({
-                    f"boundary_{k}": v for k, v in _boundary_counts.items()
-                })
 
         # Group labels by (rounded) x-position so overlapping major/minor ticks can be
         # merged into a single rendered label entry at that coordinate.
@@ -728,6 +793,18 @@ class DearCyFi(dcg.Plot):
             self._diag_overlaps_series.X = np.array(ovl_x_parts, dtype=np.float64)
             self._diag_overlaps_series.Y = np.array(ovl_y_parts, dtype=np.float64)
 
+        if self._boundary_tick_debug and scaling_factor is not None and scaling_factor > 0:
+            self._ensure_diag_series()
+            pulse_half_width = scaling_factor * 2.0
+            tick_x_parts: list[float] = []
+            tick_y_parts: list[float] = []
+            for x in injected_boundary_positions:
+                tick_x_parts.extend([x - pulse_half_width, x + pulse_half_width])
+                tick_y_parts.extend([0.65, 0.0])
+
+            self._diag_boundary_ticks_series.X = np.array(tick_x_parts, dtype=np.float64)
+            self._diag_boundary_ticks_series.Y = np.array(tick_y_parts, dtype=np.float64)
+
         # Update tick counts for debug overlay
         n_l0 = sum(1 for t in ticks if t.level == 0)
         n_l1 = sum(1 for t in ticks if t.level == 1)
@@ -738,6 +815,8 @@ class DearCyFi(dcg.Plot):
             "labels_rendered": len(labels),
             "overlap_count": overlap_count,
             "overlap_total_width": overlap_total_width,
+            "injected_boundary_ticks": len(injected_boundary_positions),
+            **{f"boundary_{k}": v for k, v in boundary_counts.items()},
         }
         self.debug_text.value = self._format_debug_text()
 
