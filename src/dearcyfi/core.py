@@ -659,10 +659,11 @@ class DearCyFi(dcg.Plot):
                 by_pos[key] = entry
             # Old code:
             # is_major = bool(getattr(t, "major", False) or getattr(t, "level", 0) == 1)
-            # New code: use tick level to determine major vs minor, since some locators may not set 'major' flag consistently.
-            # Use tick level to choose label lane. Level-1 => major (top line),
-            # level-0 => minor (bottom line). This preserves midnight hour ticks
-            # when level-0 boundary ticks happen to carry major=True.
+            # Use tick level, not tick.major, to choose the label row.
+            # In DearCyFi, level-1 is the upper major row and level-0 is the
+            # lower minor row. A boundary tick can still be major=True while
+            # living on level-0, so tick.major alone is not enough to pick the
+            # rendered row.
             is_major = bool(getattr(t, "level", 0) == 1)
             if is_major:
                 entry["major"] = t.label
@@ -672,8 +673,9 @@ class DearCyFi(dcg.Plot):
         labels = []
         coords = []
         majors = []
-        # Convert grouped per-position labels into final axis arrays expected by DearCyGui.
-        # If both major+minor exist at same x, render as two lines; otherwise render whichever exists.
+        # Convert grouped per-position labels into the final axis arrays.
+        # A single x-position may carry both rows: upper major row first, then
+        # lower minor row on the next line.
         for key in sorted(by_pos, key=lambda k: float(by_pos[k]["pos"])):
             entry = by_pos[key]
             major_label = entry["major"]

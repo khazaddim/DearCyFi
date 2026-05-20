@@ -120,13 +120,27 @@ def _interval_to_seconds(interval):
         ) from exc
 
 
-def _start_date_to_timestamp(start_date):
-    """Normalize supported start_date inputs to a UTC Unix timestamp."""
+def _normalize_timestamp_timezone(timestamp_timezone):
+    """Normalize the supported timestamp timezone modes."""
+    normalized_timezone = str(timestamp_timezone).strip().lower()
+    if normalized_timezone not in {"local", "utc"}:
+        raise ValueError("timestamp_timezone must be 'local' or 'utc'")
+    return normalized_timezone
+
+
+def _start_date_to_timestamp(start_date, timestamp_timezone="local"):
+    """Normalize supported start_date inputs to a Unix timestamp."""
+    timestamp_timezone = _normalize_timestamp_timezone(timestamp_timezone)
+
     if isinstance(start_date, (int, float)):
         return int(start_date)
 
     if isinstance(start_date, datetime):
-        return int(start_date.replace(tzinfo=timezone.utc).timestamp())
+        if start_date.tzinfo is not None:
+            return int(start_date.timestamp())
+        if timestamp_timezone == "utc":
+            return int(start_date.replace(tzinfo=timezone.utc).timestamp())
+        return int(start_date.timestamp())
 
     normalized_start_date = str(start_date).strip()
     supported_formats = (
@@ -139,7 +153,9 @@ def _start_date_to_timestamp(start_date):
     for date_format in supported_formats:
         try:
             parsed_start_date = datetime.strptime(normalized_start_date, date_format)
-            return int(parsed_start_date.replace(tzinfo=timezone.utc).timestamp())
+            if timestamp_timezone == "utc":
+                return int(parsed_start_date.replace(tzinfo=timezone.utc).timestamp())
+            return int(parsed_start_date.timestamp())
         except ValueError:
             continue
 
@@ -158,7 +174,8 @@ def generate_fake_candlestick_data(
     length=30,
     start_date="2024-08-05",
     random=False,
-    interval="daily"  # New kwarg: "daily", "hourly", or "minute"
+    interval="daily",
+    timestamp_timezone="local",
 ):
     """
     Generate fake OHLC (Open, High, Low, Close) stock data for candlestick charts,
@@ -185,6 +202,10 @@ def generate_fake_candlestick_data(
         (used if dates is None).
     interval : str
         "weekly", "daily", "hourly", "15min", "5min", or "minute" candles.
+    timestamp_timezone : str
+        "local" or "utc". Controls how string and naive datetime start dates are
+        converted to Unix timestamps. Numeric and timezone-aware datetime inputs
+        are already absolute timestamps and are not shifted.
 
     Returns
     -------
@@ -199,7 +220,7 @@ def generate_fake_candlestick_data(
     step = _interval_to_seconds(interval)
 
     if dates is None:
-        start = _start_date_to_timestamp(start_date)
+        start = _start_date_to_timestamp(start_date, timestamp_timezone)
         dates = np.array([start + step * i for i in range(length)])
 
     opens, highs, lows, closes, volume = _create_candles_and_volume(

@@ -32,6 +32,9 @@ REFERENCE_DATE_TS = int(REFERENCE_DATE_DT.timestamp())
 REFERENCE_DATETIME_STR = "2024-08-05 09:30"
 REFERENCE_DATETIME_DT = datetime(2024, 8, 5, 9, 30, tzinfo=timezone.utc)
 REFERENCE_DATETIME_TS = int(REFERENCE_DATETIME_DT.timestamp())
+REFERENCE_LOCAL_DATE_TS = int(
+    datetime.strptime(REFERENCE_DATE_STR, "%Y-%m-%d").timestamp()
+)
 
 
 def test_start_date_overloads_produce_same_first_timestamp():
@@ -40,21 +43,47 @@ def test_start_date_overloads_produce_same_first_timestamp():
         length=3,
         gap_types=[],
         interval="daily",
+        timestamp_timezone="utc",
     )
     dates_int, *_ = generate_fake_candlestick_data(
         start_date=REFERENCE_DATE_TS,
         length=3,
         gap_types=[],
         interval="daily",
+        timestamp_timezone="utc",
     )
     dates_dt, *_ = generate_fake_candlestick_data(
         start_date=REFERENCE_DATE_DT,
         length=3,
         gap_types=[],
         interval="daily",
+        timestamp_timezone="utc",
     )
 
     assert dates_str[0] == dates_int[0] == dates_dt[0]
+
+
+def test_default_start_date_timezone_is_local_for_string_inputs():
+    dates, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATE_STR,
+        length=3,
+        gap_types=[],
+        interval="daily",
+    )
+
+    assert dates[0] == REFERENCE_LOCAL_DATE_TS
+
+
+def test_start_date_timezone_utc_preserves_utc_midnight_for_string_inputs():
+    dates, *_ = generate_fake_candlestick_data(
+        start_date=REFERENCE_DATE_STR,
+        length=3,
+        gap_types=[],
+        interval="daily",
+        timestamp_timezone="utc",
+    )
+
+    assert dates[0] == REFERENCE_DATE_TS
 
 
 def test_timed_start_date_overloads_produce_same_first_timestamp():
@@ -63,18 +92,21 @@ def test_timed_start_date_overloads_produce_same_first_timestamp():
         length=3,
         gap_types=[],
         interval="hourly",
+        timestamp_timezone="utc",
     )
     dates_int, *_ = generate_fake_candlestick_data(
         start_date=REFERENCE_DATETIME_TS,
         length=3,
         gap_types=[],
         interval="hourly",
+        timestamp_timezone="utc",
     )
     dates_dt, *_ = generate_fake_candlestick_data(
         start_date=REFERENCE_DATETIME_DT,
         length=3,
         gap_types=[],
         interval="hourly",
+        timestamp_timezone="utc",
     )
 
     assert dates_str[0] == dates_int[0] == dates_dt[0]
@@ -214,5 +246,15 @@ def test_invalid_interval_raises_value_error():
             start_date=REFERENCE_DATE_STR,
             gap_types=[],
             interval="monthly",
+            length=5,
+        )
+
+
+def test_invalid_timestamp_timezone_raises_value_error():
+    with pytest.raises(ValueError, match="timestamp_timezone"):
+        generate_fake_candlestick_data(
+            start_date=REFERENCE_DATE_STR,
+            gap_types=[],
+            timestamp_timezone="exchange",
             length=5,
         )

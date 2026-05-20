@@ -12,7 +12,9 @@ Given:
 Produce:
   - tick positions (float seconds)
   - label strings (or hidden labels)
-  - two label levels (0 = minor/top, 1 = major/bottom)
+    - tick metadata describing:
+            - which row/lane a label belongs to (`level`)
+            - whether a tick is a major calendar/time boundary (`major`)
 
 Notes / Differences vs ImPlot
 -----------------------------
@@ -40,22 +42,59 @@ t1 |----|----|----|----| t2
  boundary (unit1)
 
 Where:
-- t1, t2: consecutive major boundaries (unit1)
-- t12: minor candidates inside (t1, t2), spaced by `step` in unit0
+- `unit0`: the finer unit used for dense labels and interior tick stepping
+    inside each larger interval. Examples: minutes inside an hour, or days
+    inside a month.
+- `unit1`: the next coarser unit used to define major boundaries. Examples:
+    hours when `unit0` is minutes, or months when `unit0` is days.
+- t1, t2: consecutive `unit1` boundaries.
+- t12: `unit0` candidates inside (t1, t2), spaced by `step`.
 - `minor_per_major`: budget of how many minor divisions are allowed per major interval
 - `step`: chosen from that budget (smaller step => more minor ticks)
 - `px_to_t2`: remaining pixel space to next major boundary; gates label visibility
 
 Terminology
 -----------
+- There are two label levels: in DearCyFi, `level=0` is the lower minor row
+    and `level=1` is the upper major row.
 - `major=True` means the tick lies on a major division boundary for the
     current scale (e.g., start of a new hour/day/month, depending on `unit1`).
 - `major=False` means the tick is an intermediate subdivision between major
     boundaries.
-- `level` controls label lane placement (`0` minor lane, `1` major lane) and
-    is related to, but not strictly determined by, `major`.
+- `level` controls which label lane (horizontal text row) the label belongs to.
+        In DearCyFi, `level=0` is the dense lower row and `level=1` is the sparser
+        upper row.
 - A single timestamp may have both a level-0 and level-1 tick, and both can be
     `major=True` in boundary cases.
+
+Practical mental model
+----------------------
+- `unit0` / `unit1` answer: what fine-grained time unit are we stepping in,
+    and what larger unit defines the surrounding interval?
+- `level` answers: which text row should this label be drawn in?
+- `major` answers: is this timestamp a major boundary of the coarser unit?
+
+Those are related, but they are not the same thing. A tick can be
+`major=True` and still live in the level-0 lane.
+
+Examples
+--------
+Separate rows at the same timestamp:
+
+    upper row (level=1):            | Jan 2026 |
+    lower row (level=0):            | 09:30    |
+                                     ^ same x position
+
+Boundary tick that exists on both levels:
+
+    upper row (level=1, major=True): | Jan 2026 |
+    lower row (level=0, major=True): | Jan      |
+                                       ^ same boundary timestamp
+
+Interior tick that is only on the lower row:
+
+    upper row (level=1):             .
+    lower row (level=0, major=False):| 09:45 |
 """
 
 from __future__ import annotations
@@ -192,15 +231,15 @@ class Tick:
     -----
     - `pos`: tick position as Unix timestamp in seconds (float)
         - `level`: label lane used by the locator output
-            (`0` = minor lane, `1` = major lane)
+            (`0` = lower/dense lane, `1` = upper/sparser lane)
         - `major`: whether this tick lies on a major *division boundary*
     - `show_label`: whether a label should be drawn
     - `label`: the formatted label text, or None if hidden
 
     ASCII sketch
     ------------
-    level=1 lane (major row):   |M|      |M|      |M|
-    level=0 lane (minor row):   |m|  |m| |M| |m|  |m|
+    level=1 lane (upper row):   |M|      |M|      |M|
+    level=0 lane (lower row):   |m|  |m| |M| |m|  |m|
                                 ^major=False  ^major=True boundary tick
 
     Legend:
@@ -208,10 +247,16 @@ class Tick:
     - `m` = tick with `major=False` (minor division semantics)
     - Lane placement is controlled by `level`, not solely by `major`.
 
+    Same timestamp on both levels:
+
+        level=1 (upper major row):   | Jan 2026 |
+        level=0 (lower minor row):   | 09:30    |
+                                       ^ same x position
+
         Important
         ---------
         `level` and `major` are related but not identical concepts:
-        - Use `level` to decide where/how to render the label (minor vs major row).
+        - Use `level` to decide where/how to render the label (lower row vs upper row).
         - Use `major` to understand grid/division semantics.
 
         A tick can be `major=True` while still appearing in the level-0 lane in
@@ -305,8 +350,15 @@ def get_unit_for_range(span_seconds: float) -> int:
         unit1 = min(unit0 + 1, TIME_COUNT - 1)
 
     So this function directly selects `unit0` and indirectly selects `unit1`.
-    `unit0` is used for minor-step density/formatting, while `unit1` is used
-    for major division boundaries and major-label formatting.
+        `unit0` is the finer unit used for dense stepping and dense-label formatting.
+        `unit1` is the next coarser unit used for major boundaries and sparse-label
+        formatting.
+
+        Example:
+        - If the viewport is at an hour-scale density, `unit0` might be minutes
+            and `unit1` might be hours.
+        - If the viewport is at a month-scale density, `unit0` might be days and
+            `unit1` might be months.
 
     Intervals:
     - 0.001s or less: microseconds
@@ -849,25 +901,34 @@ def locator_time(
     -------
     A flat list of Tick objects. Each tick has:
       - pos (float seconds)
-      - level (0 minor/top, 1 major/bottom)
+      - level (0 lower/dense lane, 1 upper/sparser lane)
       - major (bool)
       - show_label (bool)
       - label (Optional[str])
 
         ASCII sketch
         ------------
-        level=1 lane (major row):   |M|      |M|      |M|
-        level=0 lane (minor row):   |m|  |m| |M| |m|  |m|
+        level=1 lane (upper row):   |M|      |M|      |M|
+        level=0 lane (lower row):   |m|  |m| |M| |m|  |m|
 
                 Terminology:
                 - `major=True` means the tick lies on a major division boundary for the
                     current scale (e.g., start of a new hour/day/month, depending on `unit1`).
                 - `major=False` means the tick is an intermediate subdivision between major
                     boundaries.
-                - `level` controls label lane placement (`0` minor lane, `1` major lane) and
-                    is related to, but not strictly determined by, `major`.
+                - `level` controls label lane placement (`0` lower/dense lane,
+                    `1` upper/sparser lane) and is related to, but not strictly
+                    determined by, `major`.
                 - A single timestamp may have both a level-0 and level-1 tick, and both can be
                     `major=True` in boundary cases.
+
+        DearCyFi rendering shorthand:
+        - level 0 = lower minor row
+        - level 1 = upper major row
+        - one timestamp can carry both rows
+
+    `unit0` is the fine stepping unit for interior ticks.
+    `unit1` is the coarser boundary unit that groups those interior ticks.
 
     You can split by `tick.level` if desired.
     """
