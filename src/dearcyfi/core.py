@@ -27,7 +27,8 @@ class DearCyFi(dcg.Plot):
         font_path: str | None = None,
         font_size_px: int = 17,
         prewarm: bool = True,
-        inject_boundary_ticks: bool = True,
+        apply_date_context_labels: bool = True,
+        inject_boundary_ticks: bool | None = None,
         **plot_kwargs,
     ) -> None:
         super().__init__(context, **plot_kwargs)
@@ -36,7 +37,7 @@ class DearCyFi(dcg.Plot):
 
         self._on_status = on_status
 
-        print('loaded version with inject boundary ticks')
+        print('loaded version with date context labels')
 
         self._time_locator_use_local_time = use_local_time
         self._time_locator_use_24_hour = use_24_hour
@@ -44,7 +45,8 @@ class DearCyFi(dcg.Plot):
         self._time_locator_max_density = max_density
         self._time_locator_char_px = char_px
         self._time_locator_font_size_px = font_size_px
-        self._inject_boundary_ticks = inject_boundary_ticks
+        if inject_boundary_ticks is not None:
+            apply_date_context_labels = bool(inject_boundary_ticks)
 
         if font_path is None:
             try:
@@ -108,10 +110,13 @@ class DearCyFi(dcg.Plot):
         self._last_tick_counts: dict[str, int] = {}
 
         self._label_overlap_debug: bool = False
-        self._boundary_tick_debug: bool = False
+        self._apply_date_context_labels: bool = bool(apply_date_context_labels)
+        self._date_context_debug: bool = False
         self._diag_extents_series = None
         self._diag_overlaps_series = None
-        self._diag_boundary_ticks_series = None
+        self._diag_date_context_series = None
+        self.date_context_max_gap_px: float = 280.0
+        self.date_context_min_spacing_px: float = 160.0
 
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
@@ -148,12 +153,21 @@ class DearCyFi(dcg.Plot):
 
     @property
     def inject_boundary_ticks(self) -> bool:
-        """Whether boundary tick injection at calendar discontinuities is enabled."""
-        return self._inject_boundary_ticks
+        """Compatibility alias for date-context label repair."""
+        return self._apply_date_context_labels
 
     @inject_boundary_ticks.setter
     def inject_boundary_ticks(self, value: bool) -> None:
-        self._inject_boundary_ticks = bool(value)
+        self.apply_date_context_labels = value
+
+    @property
+    def apply_date_context_labels(self) -> bool:
+        """Whether sparse date context should be added to existing x labels."""
+        return self._apply_date_context_labels
+
+    @apply_date_context_labels.setter
+    def apply_date_context_labels(self, value: bool) -> None:
+        self._apply_date_context_labels = bool(value)
         self.X1.fit()
 
     @property
@@ -178,19 +192,28 @@ class DearCyFi(dcg.Plot):
 
     @property
     def boundary_tick_debug(self) -> bool:
-        """Whether the injected-boundary-tick diagnostic overlay is enabled."""
-        return self._boundary_tick_debug
+        """Compatibility alias for the date-context diagnostic overlay."""
+        return self._date_context_debug
 
     @boundary_tick_debug.setter
     def boundary_tick_debug(self, value: bool) -> None:
+        self.date_context_debug = value
+
+    @property
+    def date_context_debug(self) -> bool:
+        """Whether the date-context label diagnostic overlay is enabled."""
+        return self._date_context_debug
+
+    @date_context_debug.setter
+    def date_context_debug(self, value: bool) -> None:
         value = bool(value)
-        if value == self._boundary_tick_debug:
+        if value == self._date_context_debug:
             return
-        self._boundary_tick_debug = value
+        self._date_context_debug = value
         if value:
             self._ensure_diag_series()
-        if self._diag_boundary_ticks_series is not None:
-            self._diag_boundary_ticks_series.show = value
+        if self._diag_date_context_series is not None:
+            self._diag_date_context_series.show = value
         self.X1.fit()
 
     def _format_debug_text(self) -> str:
@@ -215,12 +238,8 @@ class DearCyFi(dcg.Plot):
             f"ticks: L0={tc.get('level0', 0)} L1={tc.get('level1', 0)} total={tc.get('total', 0)}",
             f"labels_rendered={tc.get('labels_rendered', 0)}",
         ]
-        if tc.get("boundary_year") or tc.get("boundary_month") or tc.get("boundary_day"):
-            lines.append(
-                f"boundaries: yr={tc.get('boundary_year', 0)} mo={tc.get('boundary_month', 0)} day={tc.get('boundary_day', 0)}"
-            )
-        if tc.get("injected_boundary_ticks", 0) > 0:
-            lines.append(f"injected_boundaries={tc['injected_boundary_ticks']}")
+        if tc.get("date_context_labels", 0) > 0:
+            lines.append(f"date_context_labels={tc['date_context_labels']}")
         if tc.get("overlap_count", 0) > 0:
             lines.append(
                 f"overlaps: {tc['overlap_count']}  total_width={tc.get('overlap_total_width', 0):.2f}"
@@ -272,7 +291,7 @@ class DearCyFi(dcg.Plot):
         if (
             self._diag_extents_series is not None
             and self._diag_overlaps_series is not None
-            and self._diag_boundary_ticks_series is not None
+            and self._diag_date_context_series is not None
         ):
             return
         # Configure Y2 as a fixed 0-1 axis with no visible chrome
@@ -313,12 +332,12 @@ class DearCyFi(dcg.Plot):
                     no_legend=True,
                     theme=dcg.ThemeColorImPlot(self.context, fill=(255, 60, 60, 160)),
                 )
-            if self._diag_boundary_ticks_series is None:
-                self._diag_boundary_ticks_series = dcg.PlotDigital(
+            if self._diag_date_context_series is None:
+                self._diag_date_context_series = dcg.PlotDigital(
                     self.context,
                     X=empty_x,
                     Y=empty_y,
-                    label="##diag_boundary_ticks",
+                    label="##diag_date_context_labels",
                     axes=y2_axes,
                     no_legend=True,
                     theme=dcg.ThemeColorImPlot(self.context, fill=(255, 190, 40, 180)),
@@ -326,7 +345,7 @@ class DearCyFi(dcg.Plot):
 
         self._diag_extents_series.show = self._label_overlap_debug
         self._diag_overlaps_series.show = self._label_overlap_debug
-        self._diag_boundary_ticks_series.show = self._boundary_tick_debug
+        self._diag_date_context_series.show = self._date_context_debug
 
     def get_time_format_config(self) -> dict[str, object]:
         return {
@@ -513,91 +532,106 @@ class DearCyFi(dcg.Plot):
             self.horizontal_bars.update_positions(self.X1.max)
             self._set_status(f"Updated {num_bars} horizontal bars")
 
-    def _inject_boundary_ticks_at_discontinuities(
+    def _date_context_spec_for_unit(self, unit0: int):
+        if unit0 <= locator_time3.TIME_HR:
+            return locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
+        if unit0 == locator_time3.TIME_DAY:
+            return locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
+        if unit0 == locator_time3.TIME_MO:
+            return locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
+        return None
+
+    def _format_date_context_label(
         self,
-        ticks: list,
-        boundaries,
-        min_time: float,
-        max_time: float,
-        span: float,
-        unit0: int,
-        unit1: int,
+        x: float,
+        spec,
+        *,
         use_local_time: bool,
         use_24_hour: bool,
         use_iso8601: bool,
-        injected_positions: list[float] | None = None,
-    ) -> dict[str, int]:
-        """Inject major ticks at calendar boundaries (year/month/day) within the visible range.
+    ) -> str:
+        if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
+            t_real = self._gap_manager.time_map.expand(float(x))
+        else:
+            t_real = float(x)
+        return locator_time3.format_datetime(
+            locator_time3.ImPlotTime.from_double(t_real),
+            spec,
+            use_local_time=use_local_time,
+            use_24_hour=use_24_hour,
+            use_iso8601=use_iso8601,
+        )
 
-        Maps real timestamps back into collapsed axis coordinates and appends labelled ticks
-        to *ticks* in-place.  Returns a dict mapping each boundary kind to the number of
-        ticks injected. Boundary injection supplements the locator only when the current
-        zoom level is finer than the boundary being injected, and it skips positions that
-        already have visible labels.
+    def _apply_date_context_label_repair(
+        self,
+        by_pos: dict[int, dict[str, object]],
+        *,
+        min_time: float,
+        max_time: float,
+        scaling_factor: float | None,
+        unit0: int,
+        use_local_time: bool,
+        use_24_hour: bool,
+        use_iso8601: bool,
+    ) -> list[float]:
+        """Add sparse date context to already-rendered x-label positions."""
+        if not by_pos or scaling_factor is None or scaling_factor <= 0:
+            return []
 
-        Args:
-            ticks: List of Tick objects to append boundary ticks to (modified in-place).
-            boundaries: Time-map object exposing year/month/day_starts_real arrays.
-            min_time: Lower bound of the visible collapsed axis range.
-            max_time: Upper bound of the visible collapsed axis range.
-            span: Visible time span in seconds (used to decide whether to include day boundaries).
-            unit0: Current fine-grained locator unit.
-            unit1: Current coarse locator boundary unit.
-            use_local_time: Format timestamps in local time when True.
-            use_24_hour: Use 24-hour clock format when True.
-            use_iso8601: Use ISO 8601 date format when True.
-            injected_positions: Optional list populated with collapsed x-positions
-                for ticks that were actually injected.
-        """
-        boundary_arrays: list[tuple[str, np.ndarray]] = []
+        spec = self._date_context_spec_for_unit(unit0)
+        if spec is None:
+            return []
 
-        if unit1 < locator_time3.TIME_YR:
-            boundary_arrays.append(("year", boundaries.year_starts_real))
-        if unit1 < locator_time3.TIME_MO:
-            boundary_arrays.append(("month", boundaries.month_starts_real))
-        if unit0 < locator_time3.TIME_DAY and (span / 86400.0) <= 60.0:
-            boundary_arrays.append(("day", boundaries.day_starts_real))
+        entries = sorted(by_pos.values(), key=lambda entry: float(entry["pos"]))
+        candidate_entries = [
+            entry for entry in entries
+            if entry.get("major") is None and entry.get("minor") is not None
+        ]
+        if not candidate_entries:
+            return []
 
-        # Inject additional major ticks at calendar boundaries (year/month/day)
-        # using real timestamps, then map them back into collapsed axis coordinates.
-        _boundary_counts: dict[str, int] = {}
-        occupied_positions = {
-            int(round(float(t.pos)))
-            for t in ticks
-            if bool(getattr(t, "show_label", False)) and getattr(t, "label", None) is not None
-        }
-        for kind, arr in boundary_arrays:
-            if arr.size == 0:
+        max_gap = max(float(self.date_context_max_gap_px) * scaling_factor, 1.0)
+        min_spacing = max(float(self.date_context_min_spacing_px) * scaling_factor, 0.0)
+        major_positions = [float(entry["pos"]) for entry in entries if entry.get("major") is not None]
+        anchors = [float(min_time), *major_positions, float(max_time)]
+        anchors = sorted(dict.fromkeys(int(round(pos)) for pos in anchors))
+
+        repaired_positions: list[float] = []
+        used_keys: set[int] = set()
+
+        for left_key, right_key in zip(anchors, anchors[1:]):
+            left = float(left_key)
+            right = float(right_key)
+            gap = right - left
+            if gap <= max_gap:
                 continue
-            _kind_count = 0
-            for t_real in arr:
-                x = float(self._gap_manager.time_map.collapse(float(t_real)))
-                if x < min_time or x > max_time:
+
+            repair_count = max(1, int(gap // max_gap))
+            for i in range(repair_count):
+                target = left + gap * float(i + 1) / float(repair_count + 1)
+                choices = [
+                    entry for entry in candidate_entries
+                    if left < float(entry["pos"]) < right
+                    and int(round(float(entry["pos"]))) not in used_keys
+                    and all(abs(float(entry["pos"]) - pos) >= min_spacing for pos in repaired_positions)
+                    and all(abs(float(entry["pos"]) - pos) >= min_spacing for pos in major_positions)
+                ]
+                if not choices:
                     continue
-                position_key = int(round(x))
-                if position_key in occupied_positions:
-                    continue
-                tp = locator_time3.ImPlotTime.from_double(float(t_real))
-                if kind == "year":
-                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
-                elif kind == "month":
-                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_MO_YR, locator_time3.TIMEFMT_NONE)
-                else:
-                    spec = locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO, locator_time3.TIMEFMT_NONE)
-                label = locator_time3.format_datetime(
-                    tp,
+
+                chosen = min(choices, key=lambda entry: abs(float(entry["pos"]) - target))
+                pos = float(chosen["pos"])
+                chosen["major"] = self._format_date_context_label(
+                    pos,
                     spec,
                     use_local_time=use_local_time,
                     use_24_hour=use_24_hour,
                     use_iso8601=use_iso8601,
                 )
-                ticks.append(locator_time3.Tick(pos=x, level=1, major=True, show_label=True, label=label))
-                if injected_positions is not None:
-                    injected_positions.append(x)
-                occupied_positions.add(position_key)
-                _kind_count += 1
-            _boundary_counts[kind] = _kind_count
-        return _boundary_counts
+                used_keys.add(int(round(pos)))
+                repaired_positions.append(pos)
+
+        return repaired_positions
 
     def axes_resize_callback(self, sender, target, data) -> None:
         x_axis_info = data[0]
@@ -636,14 +670,12 @@ class DearCyFi(dcg.Plot):
 
         ticks = self._time_locator(min_time, max_time, pixels)
 
-        boundary_counts: dict[str, int] = {}
-        injected_boundary_positions: list[float] = []
+        date_context_positions: list[float] = []
+        use_local_time = bool(getattr(self._time_locator, "use_local_time", True))
+        use_24_hour = bool(getattr(self._time_locator, "use_24_hour", False))
+        use_iso8601 = bool(getattr(self._time_locator, "use_iso8601", False))
 
         if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
-            use_local_time = bool(getattr(self._time_locator, "use_local_time", True))
-            use_24_hour = bool(getattr(self._time_locator, "use_24_hour", False))
-            use_iso8601 = bool(getattr(self._time_locator, "use_iso8601", False))
-
             relabeled: list[locator_time3.Tick] = []
             last_major_label: str | None = None
             # Reformat each generated tick from collapsed coordinates back to real-time labels.
@@ -695,21 +727,6 @@ class DearCyFi(dcg.Plot):
 
             ticks = relabeled
 
-            if self._inject_boundary_ticks:
-                boundary_counts = self._inject_boundary_ticks_at_discontinuities(
-                    ticks=ticks,
-                    boundaries=self._gap_manager.time_map,
-                    min_time=min_time,
-                    max_time=max_time,
-                    span=span,
-                    unit0=unit0,
-                    unit1=unit1,
-                    use_local_time=use_local_time,
-                    use_24_hour=use_24_hour,
-                    use_iso8601=use_iso8601,
-                    injected_positions=injected_boundary_positions,
-                )
-
         # Group labels by (rounded) x-position so overlapping major/minor ticks can be
         # merged into a single rendered label entry at that coordinate.
         by_pos: dict[int, dict[str, object]] = {}
@@ -734,6 +751,18 @@ class DearCyFi(dcg.Plot):
                 entry["major"] = t.label
             else:
                 entry["minor"] = t.label
+
+        if self._apply_date_context_labels:
+            date_context_positions = self._apply_date_context_label_repair(
+                by_pos,
+                min_time=min_time,
+                max_time=max_time,
+                scaling_factor=scaling_factor,
+                unit0=unit0,
+                use_local_time=use_local_time,
+                use_24_hour=use_24_hour,
+                use_iso8601=use_iso8601,
+            )
 
         labels = []
         coords = []
@@ -793,17 +822,17 @@ class DearCyFi(dcg.Plot):
             self._diag_overlaps_series.X = np.array(ovl_x_parts, dtype=np.float64)
             self._diag_overlaps_series.Y = np.array(ovl_y_parts, dtype=np.float64)
 
-        if self._boundary_tick_debug and scaling_factor is not None and scaling_factor > 0:
+        if self._date_context_debug and scaling_factor is not None and scaling_factor > 0:
             self._ensure_diag_series()
             pulse_half_width = scaling_factor * 2.0
             tick_x_parts: list[float] = []
             tick_y_parts: list[float] = []
-            for x in injected_boundary_positions:
+            for x in date_context_positions:
                 tick_x_parts.extend([x - pulse_half_width, x + pulse_half_width])
                 tick_y_parts.extend([0.65, 0.0])
 
-            self._diag_boundary_ticks_series.X = np.array(tick_x_parts, dtype=np.float64)
-            self._diag_boundary_ticks_series.Y = np.array(tick_y_parts, dtype=np.float64)
+            self._diag_date_context_series.X = np.array(tick_x_parts, dtype=np.float64)
+            self._diag_date_context_series.Y = np.array(tick_y_parts, dtype=np.float64)
 
         # Update tick counts for debug overlay
         n_l0 = sum(1 for t in ticks if t.level == 0)
@@ -815,8 +844,7 @@ class DearCyFi(dcg.Plot):
             "labels_rendered": len(labels),
             "overlap_count": overlap_count,
             "overlap_total_width": overlap_total_width,
-            "injected_boundary_ticks": len(injected_boundary_positions),
-            **{f"boundary_{k}": v for k, v in boundary_counts.items()},
+            "date_context_labels": len(date_context_positions),
         }
         self.debug_text.value = self._format_debug_text()
 
