@@ -122,9 +122,9 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
 
     # This was recently updated in the demo
     with plot:
-        dcg.PlotAnnotation(C, label="Annotation", x=x[100], y=np.sin(x[50]), text="Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
+        dcg.PlotAnnotation(C, label="Annotation", x=x[25], y=np.sin(x[50]), text="Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
         with plot.X1:
-            dcg.AxisTag(C, coord=x[50], text="Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
+            dcg.AxisTag(C, coord=x[50], text="Not Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
 
         with dcg.DrawInPlot(C):
             # Good: Pixel thickness (constant visual size)
@@ -141,13 +141,17 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
             
             # Create an invisible button at the same position
             invisible_btn = dcg.DrawInvisibleButton(C, p1=ll, p2=(ll[0]+w, ll[1]+h),
-                                                  button=dcg.MouseButtonMask.ANY,
+                                                  button=dcg.MouseButtonMask.RIGHT,
                                                   capture_mouse=True)#,show=False)
 
     # add the callback to the handler list in the plot object
     plot.handlers += [
         dcg.MouseMoveHandler(C, callback=mouse_callback),
         dcg.ClickedHandler(C, callback=clicked_callback)
+    ]
+
+    invisible_btn.handlers += [
+        dcg.ClickedHandler(C, callback=lambda s, t, d: print("Invisible button clicked!"))
     ]
 
 
