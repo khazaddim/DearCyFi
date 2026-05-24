@@ -16,3 +16,9 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+# DearCyFi Agent Notes
+
+When working on interactive DearCyFi technical indicator tools, draggable chart overlays, resize handles, or DearCyGui `DrawInvisibleButton` interaction patterns, use the project skill at `.github/skills/technical-indicator-drag-tools/SKILL.md`.
+
+Use that skill before adapting behavior from `dearcygui.utils.draw_draggable.py` into `src/dearcyfi/` or `examples/TA/`. Treat files under `.venv/` as reference material only; do not edit vendored package files for DearCyFi features.
