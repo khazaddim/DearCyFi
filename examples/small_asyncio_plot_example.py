@@ -15,6 +15,9 @@ C.queue = AsyncPoolExecutor()
 # refresh only when needed
 C.viewport.wait_for_input = True
 
+
+# Lets wrap this logical hit test state in a class to avoid using global variables
+# we can also pass in the plot.handlers list to the class and have it manage adding and removing the handlers as needed, which will be important for the drag handling to work correctly
 logical_hit_bounds = None
 logical_hit_drag_origin = None
 logical_hit_drag_active = False
