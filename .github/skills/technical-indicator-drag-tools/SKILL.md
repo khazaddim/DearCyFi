@@ -344,6 +344,32 @@ The reference utilities read callback fields while holding `self.mutex`, then re
 
 `draw_draggable.py` under `.venv/` is reference material. DearCyFi adaptations belong in `src/dearcyfi/` or proof-of-concept examples under `examples/TA/`.
 
+## Project Reference Example
+
+The current best local rectangle example is `examples/TA/TA_PoC_Invis_Btns.py`.
+
+Use it as a DearCyFi-owned reference for a small interactive tool class built from visible drawing items plus internal invisible hit regions.
+
+What this example demonstrates:
+
+- A reusable `MovableResizableBoxIndicator` class instead of plot-owned hit testing.
+- One center `DrawInvisibleButton` for move ownership.
+- Four corner `DrawInvisibleButton` items for resize ownership.
+- Visible corner handle rectangles that stay a fixed visual size for that indicator instance.
+- Screen-space handle hit targets via `min_side`, separate from the visible handle rectangles.
+- Cursor routing with `ConditionalHandler` and `MouseCursorHandler`.
+- Backup geometry captured on first drag, then geometry recomputed from cumulative drag deltas.
+- Geometry synchronization in one `update_draw_items()` method.
+- Normalized draw bounds for display, while still allowing raw corner coordinates to cross when inversion is enabled.
+- An `allow_inversion` kwarg so the same class can support either clamped or invertible rectangle behavior.
+
+Important distinction:
+
+- `draw_draggable.py` is the generic upstream pattern reference.
+- `examples/TA/TA_PoC_Invis_Btns.py` is the project-specific rectangle PoC showing how that pattern maps into DearCyFi technical-indicator work.
+
+When adapting this example into production code, keep the interaction architecture but move the class into project-owned source under `src/dearcyfi/`, tighten the public API, and replace PoC status-text updates with real callbacks or application hooks.
+
 ## Adaptation Recipe For DearCyFi Tools
 
 When building a new technical indicator drawing tool from this pattern:
