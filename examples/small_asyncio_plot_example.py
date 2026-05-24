@@ -14,6 +14,10 @@ asyncio.set_event_loop(loop)
 C.queue = AsyncPoolExecutor()
 # refresh only when needed
 C.viewport.wait_for_input = True
+
+logical_hit_bounds = None
+logical_hit_drag_origin = None
+logical_hit_drag_active = False
 # Set an icon for the viewport (must be set before initializing the viewport)
 #=C.viewport.icon = create_demo_icon()  #need to dig up my toaster icon
 
@@ -50,8 +54,66 @@ async def mouse_callback(sender, target, data):
     x_value.value = f"X: {plot.X1.mouse_coord:.2f}"
     y_value.value = f"Y: {plot.Y1.mouse_coord:.2f}"
 
+    if logical_hit_bounds is None:
+        return
+
+    x_mouse = float(plot.X1.mouse_coord)
+    y_mouse = float(plot.Y1.mouse_coord)
+    inside = (
+        logical_hit_bounds[0] <= x_mouse <= logical_hit_bounds[2]
+        and logical_hit_bounds[1] <= y_mouse <= logical_hit_bounds[3]
+    )
+    logical_hit_rect.fill = (80, 210, 120, 170) if inside else (80, 210, 120, 90)
+    logical_hit_rect.color = (180, 255, 200, 255) if inside else (80, 210, 120, 255)
+    logical_hit_status.value = (
+        "Hovering logical hit-test rectangle via plot handler."
+        if inside else
+        "Green rectangle uses plot-owned hit testing."
+    )
+
 async def clicked_callback(sender, target, data):
     print('Mouse clicked at:', plot.X1.mouse_coord, plot.Y1.mouse_coord)
+
+    if logical_hit_bounds is None:
+        return
+
+    x_mouse = float(plot.X1.mouse_coord)
+    y_mouse = float(plot.Y1.mouse_coord)
+    inside = (
+        logical_hit_bounds[0] <= x_mouse <= logical_hit_bounds[2]
+        and logical_hit_bounds[1] <= y_mouse <= logical_hit_bounds[3]
+    )
+    if inside:
+        print('Logical hit-test rectangle clicked via plot handler!')
+        logical_hit_status.value = 'Logical hit-test rectangle clicked via plot handler.'
+
+def logical_drag_callback(sender, target, data):
+    global logical_hit_drag_origin, logical_hit_drag_active
+
+    if logical_hit_bounds is None:
+        return
+
+    x_mouse = float(plot.X1.mouse_coord)
+    y_mouse = float(plot.Y1.mouse_coord)
+    inside = (
+        logical_hit_bounds[0] <= x_mouse <= logical_hit_bounds[2]
+        and logical_hit_bounds[1] <= y_mouse <= logical_hit_bounds[3]
+    )
+
+    if not logical_hit_drag_active and inside:
+        logical_hit_drag_active = True
+        logical_hit_drag_origin = (x_mouse, y_mouse)
+        print('Logical hit-test drag started while plot still owns the interaction.')
+        logical_hit_status.value = 'Dragging started inside logical hit-test rectangle.'
+
+def logical_drag_end_callback(sender, target, data):
+    global logical_hit_drag_origin, logical_hit_drag_active
+
+    if logical_hit_drag_active:
+        print('Logical hit-test drag released.')
+        logical_hit_status.value = 'Logical hit-test drag released.'
+    logical_hit_drag_origin = None
+    logical_hit_drag_active = False
 
 def lock_axes(sender, target, data):
     if plot.X1.lock_min or plot.X1.lock_max or plot.Y1.lock_min or plot.Y1.lock_max:
@@ -93,6 +155,7 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
     with dcg.HorizontalLayout(C):
         x_value=dcg.Text(C, value="Hello, World!")
         y_value=dcg.Text(C, value="Hello, World!")
+        logical_hit_status = dcg.Text(C, value="Green rectangle uses plot-owned hit testing.")
 
     with dcg.Plot(C, label="Style Editor Demo", height='filly', width='fillx', has_box_select=True) as plot:  #,callback=mouse_click_callback) #it seems this callback is for when the value changes, not for mouse movement
         # Generate sample data
@@ -138,6 +201,31 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
                             color=(200, 200, 0, 0), #(0, 255, 0), # trying to have no boarder
                             fill=(200, 200, 0, 150), 
                             thickness=0)
+
+            logical_ll = (7.2, -0.55)
+            logical_w = 2.4
+            logical_h = 0.9
+            logical_hit_bounds = (
+                logical_ll[0],
+                logical_ll[1],
+                logical_ll[0] + logical_w,
+                logical_ll[1] + logical_h,
+            )
+            logical_hit_rect = dcg.DrawRect(
+                C,
+                pmin=(logical_hit_bounds[0], logical_hit_bounds[1]),
+                pmax=(logical_hit_bounds[2], logical_hit_bounds[3]),
+                color=(80, 210, 120, 255),
+                fill=(80, 210, 120, 90),
+                thickness=2,
+            )
+            dcg.DrawText(
+                C,
+                pos=(logical_hit_bounds[0], logical_hit_bounds[3]),
+                text="Plot-handled hit test",
+                color=(255, 255, 255, 255),
+                size=14,
+            )
             
             # Create an invisible button at the same position
             invisible_btn = dcg.DrawInvisibleButton(C, p1=ll, p2=(ll[0]+w, ll[1]+h),
@@ -147,7 +235,9 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
     # add the callback to the handler list in the plot object
     plot.handlers += [
         dcg.MouseMoveHandler(C, callback=mouse_callback),
-        dcg.ClickedHandler(C, callback=clicked_callback)
+        dcg.ClickedHandler(C, callback=clicked_callback),
+        dcg.DraggingHandler(C, callback=logical_drag_callback),
+        dcg.DraggedHandler(C, callback=logical_drag_end_callback),
     ]
 
     invisible_btn.handlers += [
