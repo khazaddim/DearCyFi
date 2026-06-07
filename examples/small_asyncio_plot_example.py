@@ -74,6 +74,22 @@ async def mouse_callback(sender, target, data):
         "Green rectangle uses plot-owned hit testing."
     )
 
+    # section for changing x_tag text based on mouse position
+    if x_tag is not None:
+        # change coord to follow mouse x position
+        x_tag.coord = plot.X1.mouse_coord
+        # change text based on if mouse is near the peak or not
+        if abs(plot.X1.mouse_coord - Data_x[25]) < 0.5:
+            x_tag.text = "Peak"
+            x_tag.bg_color = (0.9, 0.1, 0.1, 1.0)
+        else:
+            x_tag.text = "Not Peak"
+            x_tag.bg_color = (0.1, 0.1, 0.9, 1.0)
+
+    # Change the tag text to be the x value of the mouse position
+    if x_tag is not None:
+        x_tag.text = f"{plot.X1.mouse_coord:.2f}"
+
 async def clicked_callback(sender, target, data):
     print('Mouse clicked at:', plot.X1.mouse_coord, plot.Y1.mouse_coord)
 
@@ -162,7 +178,7 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
 
     with dcg.Plot(C, label="Style Editor Demo", height='filly', width='fillx', has_box_select=True) as plot:  #,callback=mouse_click_callback) #it seems this callback is for when the value changes, not for mouse movement
         # Generate sample data
-        x = np.linspace(0, 10, 100)
+        Data_x = np.linspace(0, 10, 100)
 
         Irregular_x_y = (
             (0,0),
@@ -177,20 +193,20 @@ with dcg.Window(C, label="Main Window",primary=True, width='viewport.width', hei
         x_irregular, y_irregular = zip(*Irregular_x_y)
             
         # Create multiple series
-        dcg.PlotLine(C, label="Sine", X=x, Y=np.sin(x))
-        dcg.PlotScatter(C, label="Cosine", X=x, Y=np.cos(x))
-        dcg.PlotErrorBars(C, label="Error Bars", X=x, Y=np.sin(x),
-                        negatives=np.random.uniform(0.1, 0.5, size=x.shape),
-                        positives=np.random.uniform(0.1, 0.5, size=x.shape))
-        dcg.PlotDigital(C, label="Digital", X=x, Y=np.random.randint(0, 2, size=x.shape))
+        dcg.PlotLine(C, label="Sine", X=Data_x, Y=np.sin(Data_x))
+        dcg.PlotScatter(C, label="Cosine", X=Data_x, Y=np.cos(Data_x))
+        dcg.PlotErrorBars(C, label="Error Bars", X=Data_x, Y=np.sin(Data_x),
+                        negatives=np.random.uniform(0.1, 0.5, size=Data_x.shape),
+                        positives=np.random.uniform(0.1, 0.5, size=Data_x.shape))
+        dcg.PlotDigital(C, label="Digital", X=Data_x, Y=np.random.randint(0, 2, size=Data_x.shape))
         dcg.PlotDigital(C, label="Digital Irregular", X=x_irregular, Y=y_irregular)
 
 
     # This was recently updated in the demo
     with plot:
-        dcg.PlotAnnotation(C, label="Annotation", x=x[25], y=np.sin(x[50]), text="Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
+        dcg.PlotAnnotation(C, label="Annotation", x=Data_x[25], y=np.sin(Data_x[50]), text="Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
         with plot.X1:
-            dcg.AxisTag(C, coord=x[50], text="Not Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
+            x_tag=dcg.AxisTag(C, coord=Data_x[40], text="Not Peak",bg_color=(0.9, 0.1, 0.1, 1.0))
 
         with dcg.DrawInPlot(C):
             # Good: Pixel thickness (constant visual size)
