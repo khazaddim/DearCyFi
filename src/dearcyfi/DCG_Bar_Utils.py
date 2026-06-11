@@ -58,6 +58,10 @@ class PlotHorizontalBars(dcg.DrawInPlot):
             theme (dcg.ThemeList, optional): DearCyGui theme for styling. Defaults to None
             **kwargs: Additional arguments passed to dcg.DrawInPlot
         """
+        kwargs.setdefault("ignore_fit", True)
+        # ^ use setdefault to allow user override if needed, but default to True
+        # ^ this is important to prevent the bars from affecting plot auto-fitting
+        # which can cause issues with dynamic resizing and zooming
         super().__init__(context, **kwargs)
 
         if axis_x_max is None:
