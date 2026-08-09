@@ -14,7 +14,7 @@ The DearCyFi plot SHALL render horizontal liquidity overlays with `dcg.PlotColor
 - **AND** no explicit bar-geometry update callback is required for repositioning
 
 ### Requirement: Candle Volume Uses PlotColorBars With Directional Colors
-`PlotCandleStick` SHALL render its internal volume bars with `dcg.PlotColorBars` rather than `dcg.PlotDigital`, with default colors derived from candle direction.
+`PlotCandleStick` SHALL render its internal volume bars with `dcg.PlotColorBars` rather than `dcg.PlotDigital`, with default colors derived from candle direction and normalized geometry that preserves the prior bottom-anchored, Y-zoom-independent visual behavior.
 
 #### Scenario: Up/down default coloring
 - **WHEN** candle and volume data are rendered with default configuration
@@ -25,6 +25,26 @@ The DearCyFi plot SHALL render horizontal liquidity overlays with `dcg.PlotColor
 - **WHEN** caller-provided `volume_kwargs` supplies a valid `colors` payload
 - **THEN** the provided color configuration is used
 - **AND** DearCyFi still enforces count-valid color assignment behavior
+
+### Requirement: Candle Volume Uses Normalized Screen-Relative Geometry
+The default candle-volume `PlotColorBars` SHALL use `anchor="axis_min"`, `value_space="normalized"`, and `ignore_fit=True`, with non-negative volume magnitudes normalized before assignment so volume remains bottom-anchored and screen-relative as Y-axis limits change.
+
+#### Scenario: Y-axis zoom changes price limits
+- **WHEN** the selected Y-axis is panned or zoomed without changing candle-volume data
+- **THEN** volume bars remain anchored to the visible bottom of that Y-axis
+- **AND** their relative screen heights remain stable rather than scaling as raw price-axis values
+- **AND** volume bars do not influence automatic axis fitting
+
+#### Scenario: Positive volume values are normalized
+- **WHEN** a candle update contains one or more positive volume values
+- **THEN** DearCyFi normalizes their non-negative magnitudes to a stable input range
+- **AND** the largest volume maps to the configured `normalized_max_fraction` of visible plot height
+- **AND** smaller volumes retain proportional heights
+
+#### Scenario: Volume values contain no positive magnitude
+- **WHEN** volume data is empty, zero, or all zero
+- **THEN** normalization completes without division errors or non-finite values
+- **AND** no positive-height volume bar is produced for a zero value
 
 ### Requirement: Existing Diagnostics Remain Unchanged
 The PlotColorBars migration SHALL NOT change label-extent, overlap, date-context, or gap-collapse diagnostic rendering and behavior.
@@ -70,10 +90,10 @@ DearCyFi SHALL retain `DCG_Bar_Utils.py` temporarily for compatibility while rem
 - **THEN** the module remains available
 - **AND** it communicates that new code must use `dcg.PlotColorBars`
 
-### Requirement: First-Stage Bar Sizing Is Approximate
-The first-stage integration SHALL provide stable default vertical volume and price-sampled horizontal bars without requiring exact visual sizing at every zoom level.
+### Requirement: First-Stage Horizontal Bar Sizing Is Approximate
+The first-stage integration SHALL provide stable default price-sampled horizontal bars without requiring exact horizontal-bar visual sizing at every zoom level. This approximation SHALL NOT waive the normalized, Y-zoom-independent candle-volume behavior required by this specification.
 
-#### Scenario: Zoom changes approximate bar sizing
+#### Scenario: Zoom changes approximate horizontal bar sizing
 - **WHEN** the user changes plot zoom and the apparent bar size is not yet exact
-- **THEN** the bars remain visible and usable through `PlotColorBars`
-- **AND** precise sizing is deferred to a follow-up design for volume-weighted price sampling
+- **THEN** the horizontal bars remain visible and usable through `PlotColorBars`
+- **AND** precise horizontal sizing is deferred to a follow-up design for volume-weighted price sampling
