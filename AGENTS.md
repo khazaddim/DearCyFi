@@ -22,3 +22,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 When working on interactive DearCyFi technical indicator tools, draggable chart overlays, resize handles, or DearCyGui `DrawInvisibleButton` interaction patterns, use the project skill at `.github/skills/technical-indicator-drag-tools/SKILL.md`.
 
 Use that skill before adapting behavior from `dearcygui.utils.draw_draggable.py` into `src/dearcyfi/` or `examples/TA/`. Treat files under `.venv/` as reference material only; do not edit vendored package files for DearCyFi features.
+
+When designing, implementing, reviewing, or testing DearCyFi demo widgets that browse or load data from Parquet, DuckDB, databases, brokers, Tastytrade/Tastyworks, APIs, or sibling repositories, use `.github/skills/data-source-widgets/SKILL.md`.
+
+Use that skill before adapting `examples/DearCyFi_Demo/toy_data_browser.py` into a provider widget or adding options, liquidity, or other non-candle loaders. DearCyFi does not yet provide gap-aware econometric series plotting; preserve non-candle timestamps and gaps at the adapter boundary, and do not implement that missing series capability incidentally during widget work.
