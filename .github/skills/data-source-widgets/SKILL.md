@@ -143,7 +143,9 @@ The host adapts candle series to `DearCyFi.set_data(...)`. Line and bar series s
 
 ## Current DearCyFi Limitation
 
-DearCyFi currently has gap-aware candle plotting, but it does not yet have a provider-neutral econometric series type that collapses or fills time gaps for non-candle data. Treat `line` and `bars` in `PlotSeries` as the intended adapter boundary, not proof that this plotting capability already exists.
+The gap-collapse algorithm in `candle_utils/gap_utils.py` operates on timestamp arrays and is potentially reusable. The current `DearCyFi` integration is nevertheless candle-specific: `set_data(...)` creates or updates one `PlotCandleStick`, and both collapse methods update only that object's dates. Its internal volume `PlotDigital` inherits the collapsed x-coordinates through `PlotCandleStick.update(...)`.
+
+DearCyFi does not currently register or synchronize arbitrary `dcg.PlotLine`, time-based bar, or econometric series with the gap manager. `DCG_Bar_Utils.PlotHorizontalBars` is a price-level overlay anchored to the plot's right edge, not a time-series bar implementation. Treat `line` and `bars` in `PlotSeries` as the intended adapter boundary, not proof that gap-aware non-candle plotting already exists.
 
 Until that series type is designed and implemented:
 
