@@ -461,6 +461,7 @@ class DearCyFi(dcg.Plot):
         candle_label: str = "Stock Price",
         candle_weight: float = 0.1,
         time_formatter=None,
+        candle_y_axis: dcg.Axis = dcg.Axis.Y1,
     ) -> None:
         if self._gap_manager.time_is_collapsed:
             self.restore_time_chart()
@@ -493,8 +494,10 @@ class DearCyFi(dcg.Plot):
                     label=candle_label,
                     weight=candle_weight,
                     time_formatter=time_formatter,
+                    y_axis=candle_y_axis,
                 )
         else:
+            self.candlestick_plot.y_axis = candle_y_axis
             self.candlestick_plot.update_all(
                 dates=self.dates,
                 source_dates=self.dates,

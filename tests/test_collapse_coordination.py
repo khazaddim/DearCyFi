@@ -87,3 +87,21 @@ def test_set_data_registers_candles_as_backward_compatible_default(chart):
     assert chart.collapse_source_id == "candles"
     chart.collapse_time_chart_vec(debug=False)
     np.testing.assert_array_equal(chart.dates, [0, 10, 20, 30, 40])
+
+
+def test_set_data_can_move_existing_candle_composite_to_another_y_axis(chart):
+    candle_data = {
+        "dates": [0, 10],
+        "opens": [1, 2],
+        "highs": [2, 3],
+        "lows": [0, 1],
+        "closes": [1.5, 2.5],
+    }
+    chart.set_data(**candle_data)
+    assert chart.candlestick_plot.axes == (dcg.Axis.X1, dcg.Axis.Y1)
+
+    chart.set_data(**candle_data, candle_y_axis=dcg.Axis.Y3)
+
+    assert chart.candlestick_plot.y_axis == dcg.Axis.Y3
+    assert chart.candlestick_plot.axes == (dcg.Axis.X1, dcg.Axis.Y3)
+    assert chart.candlestick_plot._volume_digital_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)

@@ -61,3 +61,52 @@ def test_complete_update_replaces_render_and_interaction_data(context):
     np.testing.assert_array_equal(series.line.Y, [3])
     assert series.line.label == "GDP"
     assert len(series._interaction_layer.children) == 1
+
+
+@pytest.mark.parametrize("y_axis", [dcg.Axis.Y1, dcg.Axis.Y2, dcg.Axis.Y3])
+def test_y_axis_propagates_to_all_econometric_elements(context, y_axis):
+    series = PlotEconometricSeries(
+        context,
+        dates=[10, 20],
+        values=[1, 2],
+        markers=True,
+        y_axis=y_axis,
+    )
+
+    expected_axes = (dcg.Axis.X1, y_axis)
+    assert series.y_axis == y_axis
+    assert series.line.axes == expected_axes
+    assert series.markers.axes == expected_axes
+    assert series._interaction_layer.axes == expected_axes
+
+    series.set_plot_dates([5, 6])
+    assert series.line.axes == expected_axes
+    assert series.markers.axes == expected_axes
+    assert series._interaction_layer.axes == expected_axes
+
+
+def test_econometric_y_axis_defaults_to_y1(context):
+    series = PlotEconometricSeries(context, dates=[10], values=[1])
+
+    assert series.y_axis == dcg.Axis.Y1
+    assert series.line.axes == (dcg.Axis.X1, dcg.Axis.Y1)
+    assert series._interaction_layer.axes == (dcg.Axis.X1, dcg.Axis.Y1)
+
+
+def test_econometric_rejects_invalid_or_conflicting_axes(context):
+    with pytest.raises(ValueError, match="y_axis must be"):
+        PlotEconometricSeries(context, dates=[10], values=[1], y_axis=dcg.Axis.X1)
+    with pytest.raises(ValueError, match="line_kwargs cannot contain axes"):
+        PlotEconometricSeries(
+            context,
+            dates=[10],
+            values=[1],
+            line_kwargs={"axes": (dcg.Axis.X1, dcg.Axis.Y2)},
+        )
+    with pytest.raises(ValueError, match="marker_kwargs cannot contain axes"):
+        PlotEconometricSeries(
+            context,
+            dates=[10],
+            values=[1],
+            marker_kwargs={"axes": (dcg.Axis.X1, dcg.Axis.Y2)},
+        )

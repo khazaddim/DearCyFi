@@ -4,6 +4,14 @@ from collections.abc import Callable, Sized
 import dearcygui as dcg
 import numpy as np
 
+_SUPPORTED_Y_AXES = (dcg.Axis.Y1, dcg.Axis.Y2, dcg.Axis.Y3)
+
+
+def _validate_y_axis(y_axis: dcg.Axis) -> dcg.Axis:
+    if y_axis not in _SUPPORTED_Y_AXES:
+        raise ValueError("y_axis must be dcg.Axis.Y1, dcg.Axis.Y2, or dcg.Axis.Y3")
+    return y_axis
+
 
 class PlotEconometricSeries:
     """Native line series for scalar, low-frequency econometric observations."""
@@ -20,6 +28,7 @@ class PlotEconometricSeries:
         tooltip: bool = True,
         time_formatter: Callable[[float], str] | None = None,
         value_formatter: Callable[[float], str] | None = None,
+        y_axis: dcg.Axis = dcg.Axis.Y1,
         line_kwargs: dict | None = None,
         marker_kwargs: dict | None = None,
     ) -> None:
@@ -28,6 +37,8 @@ class PlotEconometricSeries:
         self._tooltip = bool(tooltip)
         self._time_formatter = time_formatter or self._default_time_formatter
         self._value_formatter = value_formatter or self._default_value_formatter
+        self._y_axis = _validate_y_axis(y_axis)
+        axes = (dcg.Axis.X1, self._y_axis)
 
         plot_dates, original_dates, numeric_values = self._validated_arrays(
             dates,
@@ -39,12 +50,17 @@ class PlotEconometricSeries:
         self._values = numeric_values
 
         line_options = dict(line_kwargs or {})
+        if "axes" in line_options:
+            raise ValueError("line_kwargs cannot contain axes; use y_axis instead")
+        if marker_kwargs is not None and "axes" in marker_kwargs:
+            raise ValueError("marker_kwargs cannot contain axes; use y_axis instead")
         line_options.setdefault("label", self._label)
         line_options.setdefault("skip_nan", False)
         self.line = dcg.PlotLine(
             context,
             X=self._plot_dates,
             Y=self._values,
+            axes=axes,
             **line_options,
         )
 
@@ -57,10 +73,11 @@ class PlotEconometricSeries:
                 context,
                 X=self._plot_dates,
                 Y=self._values,
+                axes=axes,
                 **marker_options,
             )
 
-        self._interaction_layer = dcg.DrawingList(context)
+        self._interaction_layer = dcg.DrawInPlot(context, axes=axes)
         self._render_interactions()
 
     @staticmethod
@@ -175,3 +192,7 @@ class PlotEconometricSeries:
     @property
     def label(self) -> str:
         return self._label
+
+    @property
+    def y_axis(self) -> dcg.Axis:
+        return self._y_axis

@@ -15,6 +15,13 @@ _AUTO_TOOLTIP_FORMATS: tuple[tuple[float, str], ...] = (
     (60, "%Y-%m-%d %I:%M %p"),
 )
 _AUTO_TOOLTIP_FALLBACK_FORMAT = "%Y-%m-%d %I:%M:%S %p"
+_SUPPORTED_Y_AXES = (dcg.Axis.Y1, dcg.Axis.Y2, dcg.Axis.Y3)
+
+
+def _validate_y_axis(y_axis: dcg.Axis) -> dcg.Axis:
+    if y_axis not in _SUPPORTED_Y_AXES:
+        raise ValueError("y_axis must be dcg.Axis.Y1, dcg.Axis.Y2, or dcg.Axis.Y3")
+    return y_axis
 
 
 def _median_candle_delta_seconds(dates: Sized) -> float | None:
@@ -105,8 +112,15 @@ class PlotCandleStick(dcg.DrawInPlot):
                  weight=0.25,
                  tooltip=True,
                  time_formatter=None,
+                 y_axis: dcg.Axis = dcg.Axis.Y1,
                  **kwargs) -> None:
-        super().__init__(context, **kwargs)
+        if "axes" in kwargs:
+            raise ValueError("axes cannot be supplied with y_axis; use y_axis instead")
+        if volume_kwargs is not None and "axes" in volume_kwargs:
+            raise ValueError("volume_kwargs cannot contain axes; use y_axis instead")
+        self._y_axis = _validate_y_axis(y_axis)
+        axes = (dcg.Axis.X1, self._y_axis)
+        super().__init__(context, axes=axes, **kwargs)
         # For DrawInPlot, default no_legend is True
         # Thus the override.
         self.no_legend = no_legend
@@ -138,6 +152,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         # volume item handling
         self._volume_digital_series = None
         self._volume_kwargs = dict(volume_kwargs or {})
+        self._volume_kwargs["axes"] = axes
         self._default_volume_theme = dcg.ThemeColorImPlot(
             context,
             fill=(75, 140, 240, 110)
@@ -175,6 +190,18 @@ class PlotCandleStick(dcg.DrawInPlot):
             self._time_formatter = self._time_formatter_input
         else:
             raise TypeError("time_formatter must be callable, 'auto', or None")
+
+    @property
+    def y_axis(self) -> dcg.Axis:
+        return self._y_axis
+
+    @y_axis.setter
+    def y_axis(self, value: dcg.Axis) -> None:
+        self._y_axis = _validate_y_axis(value)
+        axes = (dcg.Axis.X1, self._y_axis)
+        self.axes = axes
+        if self._volume_digital_series is not None:
+            self._volume_digital_series.axes = axes
 
 
     def render(self) -> None:

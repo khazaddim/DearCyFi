@@ -31,6 +31,8 @@ python -m pip install .
 ## Quick Import Check
 
 ```python
+import dearcygui as dcg
+
 from dearcyfi import DearCyFi, PlotEconometricSeries
 ```
 
@@ -46,6 +48,7 @@ with chart:
 		values=weekly_values,
 		label="Weekly Liquidity",
 		markers=True,
+		y_axis=dcg.Axis.Y3,
 	)
 ```
 
@@ -55,6 +58,26 @@ original source date, and value. `source_dates` remain unchanged when
 `set_plot_dates(...)` applies transformed chart coordinates;
 `restore_source_dates()` returns the line, markers, and tooltip hit regions to
 real time.
+
+Candles and econometric series accept `Y1`, `Y2`, or `Y3` while retaining
+`X1` as the shared time axis. Candles default to `Y1` through
+`DearCyFi.set_data(..., candle_y_axis=dcg.Axis.Y1)`, and econometric series
+default to `y_axis=dcg.Axis.Y1`. The selected axis applies to each complete
+composite, including candle volume, econometric markers, and tooltip hit
+regions.
+
+The host application owns axis presentation. Enable, label, and fit a secondary
+axis explicitly, for example:
+
+```python
+chart.Y3.enabled = True
+chart.Y3.label = "Weekly Liquidity"
+chart.Y3.fit()
+```
+
+The optional label-overlap and date-context diagnostics reserve `Y2` as a
+hidden fixed scale while enabled. Use `Y1` or `Y3` for application data when
+those diagnostics are active.
 
 ## Collapse Source Selection
 
