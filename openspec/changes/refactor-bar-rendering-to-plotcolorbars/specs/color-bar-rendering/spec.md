@@ -26,6 +26,14 @@ The DearCyFi plot SHALL render horizontal liquidity overlays with `dcg.PlotColor
 - **THEN** the provided color configuration is used
 - **AND** DearCyFi still enforces count-valid color assignment behavior
 
+### Requirement: Existing Diagnostics Remain Unchanged
+The PlotColorBars migration SHALL NOT change label-extent, overlap, date-context, or gap-collapse diagnostic rendering and behavior.
+
+#### Scenario: Diagnostics remain available after bar migration
+- **WHEN** the PlotColorBars-backed volume and horizontal bar paths are active
+- **THEN** label-extent, overlap, and date-context diagnostics continue using their existing `dcg.PlotDigital` series
+- **AND** gap-collapse diagnostics and testing behavior remain unchanged
+
 ### Requirement: Axis Assignment Remains Composite-Consistent
 Bar series introduced by this change SHALL remain bound to the same axis pair as their owning composite or API selection.
 
@@ -53,3 +61,19 @@ DearCyFi SHALL document that this branch requires a DearCyGui build exposing `dc
 - **WHEN** DearCyFi runs with a DearCyGui build that lacks `PlotColorBars`
 - **THEN** DearCyFi raises a clear runtime error indicating unsupported dependency level
 - **AND** documentation points to the required custom DearCyGui branch
+
+### Requirement: Legacy Bar Utility Is Deprecated
+DearCyFi SHALL retain `DCG_Bar_Utils.py` temporarily for compatibility while removing it from default production and demo rendering paths.
+
+#### Scenario: Existing downstream import
+- **WHEN** downstream code imports the legacy bar utility during the deprecation period
+- **THEN** the module remains available
+- **AND** it communicates that new code must use `dcg.PlotColorBars`
+
+### Requirement: First-Stage Bar Sizing Is Approximate
+The first-stage integration SHALL provide stable default vertical volume and price-sampled horizontal bars without requiring exact visual sizing at every zoom level.
+
+#### Scenario: Zoom changes approximate bar sizing
+- **WHEN** the user changes plot zoom and the apparent bar size is not yet exact
+- **THEN** the bars remain visible and usable through `PlotColorBars`
+- **AND** precise sizing is deferred to a follow-up design for volume-weighted price sampling
