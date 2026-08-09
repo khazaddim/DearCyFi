@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,27 @@ from .PyTimeLocator import locator_time3
 from .DCG_Bar_Utils import PlotHorizontalBars, generate_sample_bar_data
 from .DCG_Candle_Utils import PlotCandleStick
 from .candle_utils.gap_utils import GapCollapseManager
+
+
+@dataclass(frozen=True)
+class TimeSeriesRegistration:
+    series: object
+    in_gap: str = "next"
+
+
+class _CandleSeriesAdapter:
+    def __init__(self, candle: PlotCandleStick) -> None:
+        self.candle = candle
+
+    @property
+    def source_dates(self) -> np.ndarray:
+        return np.asarray(self.candle.source_dates, dtype=float)
+
+    def set_plot_dates(self, dates: np.ndarray) -> None:
+        self.candle.update(dates=np.asarray(dates, dtype=float))
+
+    def restore_source_dates(self) -> None:
+        self.set_plot_dates(self.source_dates)
 
 
 class DearCyFi(dcg.Plot):
@@ -79,6 +101,8 @@ class DearCyFi(dcg.Plot):
         )
 
         self._gap_manager = GapCollapseManager()
+        self._time_series: dict[str, TimeSeriesRegistration] = {}
+        self._collapse_source_id: str | None = None
         self._last_resize_time_format_info: dict[str, object] = {}
 
         self.time_format_level0: tuple = tuple(locator_time3.TIME_FORMAT_LEVEL0)
@@ -129,6 +153,66 @@ class DearCyFi(dcg.Plot):
     def _set_status(self, message: str) -> None:
         if callable(self._on_status):
             self._on_status(str(message))
+
+    @property
+    def time_series_ids(self) -> tuple[str, ...]:
+        return tuple(self._time_series)
+
+    @property
+    def collapse_source_id(self) -> str | None:
+        return self._collapse_source_id
+
+    @collapse_source_id.setter
+    def collapse_source_id(self, series_id: str | None) -> None:
+        if series_id is not None and series_id not in self._time_series:
+            raise ValueError(f"Unknown collapse source ID: {series_id!r}")
+        if series_id == self._collapse_source_id:
+            return
+        self.restore_time_chart()
+        self._collapse_source_id = series_id
+
+    def register_time_series(
+        self,
+        series_id: str,
+        series,
+        *,
+        in_gap: str = "next",
+        replace: bool = False,
+    ) -> None:
+        if not isinstance(series_id, str) or not series_id:
+            raise ValueError("series_id must be a non-empty string")
+        if in_gap not in {"next", "previous"}:
+            raise ValueError("in_gap must be 'next' or 'previous'")
+        if series_id in self._time_series and not replace:
+            raise ValueError(f"Time series ID is already registered: {series_id!r}")
+        if not hasattr(series, "source_dates"):
+            raise TypeError("registered series must expose source_dates")
+        if not callable(getattr(series, "set_plot_dates", None)):
+            raise TypeError("registered series must implement set_plot_dates(dates)")
+        if not callable(getattr(series, "restore_source_dates", None)):
+            raise TypeError("registered series must implement restore_source_dates()")
+
+        if replace and series_id in self._time_series:
+            self.restore_time_chart()
+        self._time_series[series_id] = TimeSeriesRegistration(series, in_gap)
+
+    def unregister_time_series(self, series_id: str) -> None:
+        if series_id not in self._time_series:
+            raise ValueError(f"Unknown time series ID: {series_id!r}")
+        was_source = series_id == self._collapse_source_id
+        if was_source:
+            self.restore_time_chart()
+        del self._time_series[series_id]
+        if was_source:
+            self._collapse_source_id = None
+
+    def restore_time_chart(self) -> None:
+        for registration in self._time_series.values():
+            registration.series.restore_source_dates()
+        self._gap_manager.reset(None)
+        candle_registration = self._time_series.get("candles")
+        if candle_registration is not None:
+            self.dates = np.asarray(candle_registration.series.source_dates, dtype=float).copy()
 
     @staticmethod
     def _format_spec_to_dict(spec) -> dict[str, object]:
@@ -378,6 +462,8 @@ class DearCyFi(dcg.Plot):
         candle_weight: float = 0.1,
         time_formatter=None,
     ) -> None:
+        if self._gap_manager.time_is_collapsed:
+            self.restore_time_chart()
         self.dates = np.asarray(dates)
         self.opens = np.asarray(opens)
         self.highs = np.asarray(highs)
@@ -388,8 +474,6 @@ class DearCyFi(dcg.Plot):
             self.volume = np.zeros_like(self.dates, dtype=float)
         else:
             self.volume = np.asarray(volume)
-
-        self._gap_manager.reset(self.dates)
 
         if time_formatter is None:
             time_formatter = "auto"
@@ -421,6 +505,15 @@ class DearCyFi(dcg.Plot):
                 volumes=self.volume,
             )
 
+        self.register_time_series(
+            "candles",
+            _CandleSeriesAdapter(self.candlestick_plot),
+            replace="candles" in self._time_series,
+        )
+        if self._collapse_source_id is None:
+            self._collapse_source_id = "candles"
+        self._gap_manager.reset(self.dates)
+
         self._apply_custom_x_labels(
             [str(i) for i in self.index],
             self.dates,
@@ -428,7 +521,11 @@ class DearCyFi(dcg.Plot):
         )
 
     def add_gaps_chunks_GUI(self, sender=None, app_data=None, user_data=None) -> None:
-        report = self._gap_manager.build_gaps_report(self.dates)
+        if self._collapse_source_id is None:
+            self._set_status("Select a collapse source before inspecting gaps.")
+            return
+        source_dates = self._time_series[self._collapse_source_id].series.source_dates
+        report = self._gap_manager.build_gaps_report(np.asarray(source_dates, dtype=float))
         if not report.gaps:
             self._set_status("No gaps or chunks found.")
             return
@@ -436,25 +533,49 @@ class DearCyFi(dcg.Plot):
         self._set_status(report.text)
 
     def collapse_time_chart(self, sender=None, app_data=None, user_data=None, *, debug: bool = True) -> None:
+        self._collapse_registered_series(debug=debug, vectorized=False)
+
+    def _collapse_registered_series(self, *, debug: bool, vectorized: bool) -> None:
         if self._gap_manager.time_is_collapsed:
             self._set_status("Time is already collapsed. Reload data to collapse again.")
             return
+        if self._collapse_source_id is None:
+            self._set_status("Select a collapse source before collapsing time.")
+            return
 
         start_time = time.time()
-        collapsed_dates = self._gap_manager.collapse_dates(
-            self.dates,
+        source = self._time_series[self._collapse_source_id]
+        source_dates = np.asarray(source.series.source_dates, dtype=float)
+        collapse_method = (
+            self._gap_manager.collapse_dates_vectorized
+            if vectorized
+            else self._gap_manager.collapse_dates
+        )
+        collapse_method(
+            source_dates,
             use_local_time=self._time_locator_use_local_time,
             debug=debug,
         )
+        if self._gap_manager.time_map is None:
+            self._set_status("Could not build a time-collapse map from the selected source.")
+            return
 
-        old_dates = np.array(self.candlestick_plot.dates, copy=True)
-        self.candlestick_plot.update(dates=collapsed_dates)
-        self.dates = collapsed_dates
+        projections = {
+            series_id: self._gap_manager.time_map.project_many(
+                np.asarray(registration.series.source_dates, dtype=float),
+                in_gap=registration.in_gap,
+            )
+            for series_id, registration in self._time_series.items()
+        }
+        try:
+            for series_id, dates in projections.items():
+                self._time_series[series_id].series.set_plot_dates(dates)
+        except Exception:
+            self.restore_time_chart()
+            raise
 
-        if np.array_equal(old_dates, np.array(self.candlestick_plot.dates)):
-            print("Dates did not change after collapsing time.")
-        else:
-            print("Dates successfully collapsed.")
+        if "candles" in projections:
+            self.dates = projections["candles"].copy()
 
         elapsed = time.time() - start_time
         status_msg = f"Time collapse took {elapsed:.4f} seconds."
@@ -464,32 +585,7 @@ class DearCyFi(dcg.Plot):
         self._set_status(status_msg)
 
     def collapse_time_chart_vec(self, sender=None, app_data=None, user_data=None, *, debug: bool = True) -> None:
-        if self._gap_manager.time_is_collapsed:
-            self._set_status("Time is already collapsed. Reload data to collapse again.")
-            return
-
-        start_time = time.time()
-        collapsed_dates = self._gap_manager.collapse_dates_vectorized(
-            self.dates,
-            use_local_time=self._time_locator_use_local_time,
-            debug=debug,
-        )
-
-        old_dates = np.array(self.candlestick_plot.dates, copy=True)
-        self.candlestick_plot.update(dates=collapsed_dates)
-        self.dates = collapsed_dates
-
-        if np.array_equal(old_dates, np.array(self.candlestick_plot.dates)):
-            print("Dates did not change after collapsing time.")
-        else:
-            print("Dates successfully collapsed.")
-
-        elapsed = time.time() - start_time
-        status_msg = f"Time collapse took {elapsed:.4f} seconds."
-        if debug and self._gap_manager.time_map is not None:
-            dump_text = self._gap_manager.time_map.debug_dump(limit=16)
-            status_msg = f"{status_msg}\n\n{dump_text}"
-        self._set_status(status_msg)
+        self._collapse_registered_series(debug=debug, vectorized=True)
 
     def load_horizontal_bars(
         self,

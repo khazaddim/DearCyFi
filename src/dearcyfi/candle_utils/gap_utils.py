@@ -297,6 +297,51 @@ class GapCollapsedTimeMap:
             return self._segments[0].collapsed_start
         return self._segments[-1].collapsed_end
 
+    def project(self, real_time: float, *, in_gap: str = "next") -> float:
+        """Project an arbitrary timestamp through this map.
+
+        Timestamps in retained segments keep their position. Values inside a
+        removed gap snap to its next or previous source boundary. Values outside
+        the source range retain their offset using the nearest segment's shift.
+        """
+        if in_gap not in {"next", "previous"}:
+            raise ValueError("in_gap must be 'next' or 'previous'")
+
+        timestamp = float(real_time)
+        if not np.isfinite(timestamp):
+            return timestamp
+
+        first = self._segments[0]
+        last = self._segments[-1]
+        if timestamp < first.real_start:
+            return timestamp - first.shift
+        if timestamp > last.real_end:
+            return timestamp - last.shift
+
+        for index, segment in enumerate(self._segments):
+            if segment.real_start <= timestamp <= segment.real_end:
+                return timestamp - segment.shift
+            if index + 1 >= len(self._segments):
+                break
+            next_segment = self._segments[index + 1]
+            if segment.real_end < timestamp < next_segment.real_start:
+                if in_gap == "next":
+                    return next_segment.collapsed_start
+                return segment.collapsed_end
+
+        raise ValueError(f"timestamp {timestamp!r} could not be projected")
+
+    def project_many(self, real_times: np.ndarray, *, in_gap: str = "next") -> np.ndarray:
+        """Vectorized form of :meth:`project` for follower timestamps."""
+        times = np.asarray(real_times, dtype=float)
+        flat = times.reshape(-1)
+        projected = np.fromiter(
+            (self.project(timestamp, in_gap=in_gap) for timestamp in flat),
+            dtype=float,
+            count=flat.size,
+        )
+        return projected.reshape(times.shape)
+
     def debug_dump(self, limit: int = 20) -> str:
         """Print and return a compact view of real<->collapsed segment mapping."""
         lines = [
