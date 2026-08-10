@@ -31,7 +31,7 @@ def test_y_axis_propagates_to_complete_candle_composite(context, y_axis):
     expected_axes = (dcg.Axis.X1, y_axis)
     assert candle.y_axis == y_axis
     assert candle.axes == expected_axes
-    assert candle._volume_digital_series.axes == expected_axes
+    assert candle._volume_bar_series.axes == expected_axes
 
 
 def test_candle_y_axis_defaults_to_y1(context):
@@ -39,7 +39,7 @@ def test_candle_y_axis_defaults_to_y1(context):
 
     assert candle.y_axis == dcg.Axis.Y1
     assert candle.axes == (dcg.Axis.X1, dcg.Axis.Y1)
-    assert candle._volume_digital_series.axes == (dcg.Axis.X1, dcg.Axis.Y1)
+    assert candle._volume_bar_series.axes == (dcg.Axis.X1, dcg.Axis.Y1)
 
 
 def test_candle_y_axis_update_moves_complete_composite(context):
@@ -48,7 +48,7 @@ def test_candle_y_axis_update_moves_complete_composite(context):
     candle.y_axis = dcg.Axis.Y3
 
     assert candle.axes == (dcg.Axis.X1, dcg.Axis.Y3)
-    assert candle._volume_digital_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)
+    assert candle._volume_bar_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)
 
 
 def test_candle_rejects_invalid_or_conflicting_axes(context):

@@ -104,4 +104,4 @@ def test_set_data_can_move_existing_candle_composite_to_another_y_axis(chart):
 
     assert chart.candlestick_plot.y_axis == dcg.Axis.Y3
     assert chart.candlestick_plot.axes == (dcg.Axis.X1, dcg.Axis.Y3)
-    assert chart.candlestick_plot._volume_digital_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)
+    assert chart.candlestick_plot._volume_bar_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)

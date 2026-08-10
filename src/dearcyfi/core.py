@@ -7,9 +7,24 @@ import dearcygui as dcg
 import numpy as np
 
 from .PyTimeLocator import locator_time3
-from .DCG_Bar_Utils import PlotHorizontalBars, generate_sample_bar_data
 from .DCG_Candle_Utils import PlotCandleStick
 from .candle_utils.gap_utils import GapCollapseManager
+
+
+def _generate_sample_bar_data(num_bars, y_min, y_max, x_min, x_max):
+    positions = np.linspace(y_min, y_max, num_bars)
+    lengths = np.random.uniform(x_min, x_max, size=num_bars)
+    return lengths, positions
+
+
+def _horizontal_bar_weight(positions) -> float:
+    values = np.sort(np.asarray(positions, dtype=float))
+    if values.size > 1:
+        spacing = np.diff(values)
+        spacing = spacing[np.isfinite(spacing) & (spacing > 0)]
+        if spacing.size:
+            return float(np.min(spacing) * 0.95)
+    return 0.1
 
 
 @dataclass(frozen=True)
@@ -599,7 +614,17 @@ class DearCyFi(dcg.Plot):
         num_bars: int = 200,
         x_min: float = 0.5 * 100000,
         x_max: float = 3.0 * 100000,
+        value_space: str = "data",
+        normalized_max_fraction: float = 0.35,
     ) -> None:
+        if not hasattr(dcg, "PlotColorBars"):
+            raise RuntimeError(
+                "Horizontal bar rendering requires a DearCyGui build that "
+                "provides dcg.PlotColorBars"
+            )
+        if value_space not in ("data", "normalized"):
+            raise ValueError("value_space must be 'data' or 'normalized'")
+
         if len(self.lows) > 0 and len(self.highs) > 0:
             y_min = float(np.min(self.lows))
             y_max = float(np.max(self.highs))
@@ -607,28 +632,43 @@ class DearCyFi(dcg.Plot):
             y_min = 0.0
             y_max = 100.0
 
-        X, Y = generate_sample_bar_data(
+        X, Y = _generate_sample_bar_data(
             num_bars=num_bars,
             y_min=y_min,
             y_max=y_max,
             x_min=x_min,
             x_max=x_max,
         )
+        if value_space == "normalized" and len(X):
+            X = np.maximum(np.asarray(X, dtype=float), 0.0)
+            maximum = float(np.max(X))
+            X = X / maximum if maximum > 0.0 else np.zeros_like(X)
 
         if self.horizontal_bars is None:
             with self:
-                self.horizontal_bars = PlotHorizontalBars(
+                self.horizontal_bars = dcg.PlotColorBars(
                     self.context,
                     X=X,
                     Y=Y,
-                    axis_x_max=self.X1.max,
-                    color=(180, 0, 220, 120),
+                    colors=(180, 0, 220, 120),
                     label="Horizontal Bars",
+                    horizontal=True,
+                    anchor="axis_max",
+                    value_space=value_space,
+                    normalized_max_fraction=normalized_max_fraction,
+                    weight=_horizontal_bar_weight(Y),
+                    ignore_fit=True,
+                    axes=(dcg.Axis.X1, dcg.Axis.Y1),
                 )
             self._set_status(f"Loaded {num_bars} horizontal bars")
         else:
-            self.horizontal_bars.update(X=X, Y=Y)
-            self.horizontal_bars.update_positions(self.X1.max)
+            self.horizontal_bars.X = []
+            self.horizontal_bars.Y = []
+            self.horizontal_bars.value_space = value_space
+            self.horizontal_bars.normalized_max_fraction = normalized_max_fraction
+            self.horizontal_bars.weight = _horizontal_bar_weight(Y)
+            self.horizontal_bars.X = X
+            self.horizontal_bars.Y = Y
             self._set_status(f"Updated {num_bars} horizontal bars")
 
     def _date_context_spec_for_unit(self, unit0: int):
@@ -947,5 +987,3 @@ class DearCyFi(dcg.Plot):
         }
         self.debug_text.value = self._format_debug_text()
 
-        if self.horizontal_bars is not None:
-            self.horizontal_bars.update_positions(max_time)

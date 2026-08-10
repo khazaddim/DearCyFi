@@ -28,6 +28,29 @@ Standard install from source tree:
 python -m pip install .
 ```
 
+This development branch requires the custom DearCyGui branch that exposes
+`dcg.PlotColorBars`. Candle volume and horizontal liquidity overlays fail with
+a clear runtime error when that API is unavailable.
+
+## Color Bar Rendering
+
+`PlotCandleStick` renders volume with bottom-anchored `PlotColorBars`. Volume
+magnitudes are clipped to non-negative values and normalized so the largest
+visible input occupies 20% of the plot height. Up candles use the bull color,
+down candles use the bear color, and `volume_kwargs={"colors": ...}` can
+override that mapping. The bars use normalized value space and do not affect
+axis fitting, so their screen-relative height remains stable during Y-axis
+pan and zoom.
+
+`DearCyFi.load_horizontal_bars(...)` uses native right-edge anchoring and
+accepts `value_space="data"` or `value_space="normalized"`. Exact apparent
+horizontal sizing across every zoom level remains approximate until
+volume-weighted price sampling is implemented.
+
+The legacy `dearcyfi.DCG_Bar_Utils.PlotHorizontalBars` helper remains
+importable for compatibility but is deprecated. New code should instantiate
+`dcg.PlotColorBars(horizontal=True, anchor="axis_max")`.
+
 ## Quick Import Check
 
 ```python

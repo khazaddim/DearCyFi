@@ -1,3 +1,7 @@
+"""Deprecated compatibility helpers for pre-PlotColorBars integrations."""
+
+import warnings
+
 import numpy as np
 import dearcygui as dcg
 from collections.abc import Sized
@@ -5,7 +9,10 @@ from collections.abc import Sized
 
 class PlotHorizontalBars(dcg.DrawInPlot):
     """
-    Adds a horizontal bar series to a plot.
+    Deprecated callback-driven horizontal bar series.
+
+    New code should use ``dcg.PlotColorBars(horizontal=True,
+    anchor="axis_max")`` directly.
     
     Bars extend horizontally from the right edge of the plot leftward,
     positioned at specific Y coordinates. Dynamically updates positions
@@ -58,6 +65,12 @@ class PlotHorizontalBars(dcg.DrawInPlot):
             theme (dcg.ThemeList, optional): DearCyGui theme for styling. Defaults to None
             **kwargs: Additional arguments passed to dcg.DrawInPlot
         """
+        warnings.warn(
+            "PlotHorizontalBars is deprecated; use "
+            "dcg.PlotColorBars(horizontal=True, anchor='axis_max')",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         kwargs.setdefault("ignore_fit", True)
         # ^ use setdefault to allow user override if needed, but default to True
         # ^ this is important to prevent the bars from affecting plot auto-fitting

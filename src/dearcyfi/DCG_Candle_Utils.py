@@ -16,6 +16,7 @@ _AUTO_TOOLTIP_FORMATS: tuple[tuple[float, str], ...] = (
 )
 _AUTO_TOOLTIP_FALLBACK_FORMAT = "%Y-%m-%d %I:%M:%S %p"
 _SUPPORTED_Y_AXES = (dcg.Axis.Y1, dcg.Axis.Y2, dcg.Axis.Y3)
+_DEFAULT_VOLUME_MAX_FRACTION = 0.20
 
 
 def _validate_y_axis(y_axis: dcg.Axis) -> dcg.Axis:
@@ -62,16 +63,9 @@ class PlotCandleStick(dcg.DrawInPlot):
     a custom version with more interactions.
 
     Volume Scaling Note:
-        Volume data is plotted on the same Y-axis as price data, making it a relative
-        representation of volume. For proper visualization, volume values should be 
-        scaled so that the maximum volume is approximately 20% of the price range 
-        (max_high - min_low). This ensures volume bars are confined to the bottom 
-        portion of the chart without obscuring price data.
-        
-        If volume data exceeds this threshold, a warning will be printed and the data
-        will be automatically normalized to fit within the recommended scale.
-        
-        Example: For price range 100-150 (range=50), max volume should be ~10 (20% of 50).
+        Non-negative volume magnitudes are normalized independently of the price
+        scale. By default the largest volume occupies 20% of the visible plot
+        height and remains bottom-anchored while the selected Y-axis is zoomed.
 
     Args:
         dates (np.ndarray): x-axis values
@@ -149,29 +143,30 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._time_counts = time_counts
         self._count_position = count_position
         self._count_offset = count_offset
-        # volume item handling
-        self._volume_digital_series = None
-        self._volume_kwargs = dict(volume_kwargs or {})
-        self._volume_kwargs["axes"] = axes
-        self._default_volume_theme = dcg.ThemeColorImPlot(
-            context,
-            fill=(75, 140, 240, 110)
-            #line=(75, 140, 240, 200),
-        )
-        self._volume_kwargs.setdefault("theme", self._default_volume_theme)
-        try:
-            self._volume_digital_series = dcg.PlotDigital(context, X=self._dates, Y=self._volumes, **self._volume_kwargs)
-        except Exception as e:
-            # fail gracefully; keep None
-            print(f"Couldn't create internal PlotDigital: {e}")
-
         self._bull_color = dcg.color_as_int(bull_color)
         self._bear_color = dcg.color_as_int(bear_color)
         self._weight = float(weight)
-        self._tooltip = tooltip
 
-        # Validate and normalize volume data if needed
-        self._normalize_volumes_if_needed()
+        # volume item handling
+        if not hasattr(dcg, "PlotColorBars"):
+            raise RuntimeError(
+                "PlotCandleStick volume rendering requires a DearCyGui build "
+                "that provides dcg.PlotColorBars"
+            )
+        self._volume_bar_series = None
+        self._volume_kwargs = dict(volume_kwargs or {})
+        self._volume_kwargs["axes"] = axes
+        self._volume_kwargs.setdefault("anchor", "axis_min")
+        self._volume_kwargs.setdefault("value_space", "normalized")
+        self._volume_kwargs.setdefault("normalized_max_fraction", _DEFAULT_VOLUME_MAX_FRACTION)
+        self._volume_kwargs.setdefault("ignore_fit", True)
+        self._volume_uses_default_weight = "weight" not in self._volume_kwargs
+        self._volume_kwargs.setdefault("weight", self._volume_bar_weight())
+        self._volume_color_override = self._volume_kwargs.pop("colors", None)
+        self._volume_bar_series = dcg.PlotColorBars(context, **self._volume_kwargs)
+
+        self._tooltip = tooltip
+        self._update_volume_series()
 
         self._time_formatter_input = time_formatter
         self._refresh_time_formatter()
@@ -200,8 +195,55 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._y_axis = _validate_y_axis(value)
         axes = (dcg.Axis.X1, self._y_axis)
         self.axes = axes
-        if self._volume_digital_series is not None:
-            self._volume_digital_series.axes = axes
+        if self._volume_bar_series is not None:
+            self._volume_bar_series.axes = axes
+
+    def _volume_bar_weight(self) -> float:
+        dates = np.asarray(self._dates, dtype=float)
+        if dates.size > 1:
+            deltas = np.diff(np.sort(dates[np.isfinite(dates)]))
+            deltas = deltas[deltas > 0]
+            if deltas.size:
+                return float(np.median(deltas) * self._weight * 2.0)
+        return max(self._weight * 2.0, np.finfo(float).eps)
+
+    def _normalized_volumes(self) -> np.ndarray:
+        volumes = np.asarray(self._volumes, dtype=float)
+        if volumes.size == 0:
+            return np.array([], dtype=float)
+        magnitudes = np.maximum(np.nan_to_num(volumes, nan=0.0, posinf=0.0, neginf=0.0), 0.0)
+        maximum = float(np.max(magnitudes))
+        if maximum <= 0.0:
+            return np.zeros_like(magnitudes, dtype=float)
+        return magnitudes / maximum
+
+    def _volume_colors(self):
+        if self._volume_color_override is not None:
+            return self._volume_color_override
+        opens = np.asarray(self._opens, dtype=float)
+        closes = np.asarray(self._closes, dtype=float)
+        return [
+            self._bull_color if close >= open_ else self._bear_color
+            for open_, close in zip(opens, closes)
+        ]
+
+    def _update_volume_series(self) -> None:
+        if self._volume_bar_series is None:
+            return
+        dates = np.asarray(self._dates, dtype=float)
+        normalized_volumes = self._normalized_volumes()
+        colors = self._volume_colors()
+        if normalized_volumes.size == 0:
+            dates = np.array([], dtype=float)
+            colors = []
+
+        self._volume_bar_series.X = []
+        self._volume_bar_series.Y = []
+        self._volume_bar_series.colors = colors
+        if self._volume_uses_default_weight:
+            self._volume_bar_series.weight = self._volume_bar_weight()
+        self._volume_bar_series.X = dates
+        self._volume_bar_series.Y = normalized_volumes
 
 
     def render(self) -> None:
@@ -296,12 +338,7 @@ class PlotCandleStick(dcg.DrawInPlot):
             self._time_counts = time_counts
             self._validate_time_counts()
 
-        # Validate and normalize volume data if needed
-        self._normalize_volumes_if_needed()
-
-        # update attached PlotDigital
-        self._volume_digital_series.X = self._dates
-        self._volume_digital_series.Y = self._volumes
+        self._update_volume_series()
 
         # rebuild the drawing primitives once
         self.render()
@@ -330,11 +367,7 @@ class PlotCandleStick(dcg.DrawInPlot):
 
         self._validate_lengths()
         self._validate_time_counts()
-        # Validate and normalize volume data if needed
-        self._normalize_volumes_if_needed()
-        # keep volume plot in sync for partial updates
-        self._volume_digital_series.Y = self._volumes
-        self._volume_digital_series.X = self._dates
+        self._update_volume_series()
         
         self.render()
 
@@ -410,54 +443,6 @@ class PlotCandleStick(dcg.DrawInPlot):
                         f"time_counts[{i}][{j}] must be numeric, got {type(val).__name__}: {val}"
                     )
 
-    def _normalize_volumes_if_needed(self):
-        """Check if volume data needs normalization and apply if necessary.
-        
-        Volume should be scaled so max volume ≈ 20% of price range for proper visualization.
-        If volume amplitude is too large, normalize it and print a warning.
-        """
-        import numpy as np
-        
-        # Skip if no volume data or empty arrays
-        if self._volumes is None or len(self._volumes) == 0:
-            return
-        if len(self._highs) == 0 or len(self._lows) == 0:
-            return
-        
-        # Calculate price range
-        price_max = float(np.max(self._highs))
-        price_min = float(np.min(self._lows))
-        price_range = price_max - price_min
-        
-        if price_range <= 0:
-            return  # Can't normalize with zero or negative range
-        
-        # Calculate volume range
-        volume_max = float(np.max(self._volumes))
-        volume_min = float(np.min(self._volumes))
-        
-        # Target: max volume should be ~20% of price range
-        target_max = price_range * 0.20
-        
-        # Check if normalization is needed (threshold: if max volume > 3x price range)
-        # This only catches severely mis-scaled data (e.g., volumes in thousands for prices ~100)
-        # while allowing reasonable variations in volume scale
-        normalization_threshold = price_range * 3.0
-        
-        if volume_max > normalization_threshold:
-            # Calculate scaling factor
-            scale_factor = target_max / volume_max
-            
-            # Apply normalization
-            self._volumes = np.array(self._volumes) * scale_factor
-            
-            print(f"[PlotCandleStick] Warning: Volume data amplitude too large for price scale.")
-            print(f"  Price range: {price_min:.2f} - {price_max:.2f} (range: {price_range:.2f})")
-            print(f"  Original volume range: {volume_min:.2f} - {volume_max:.2f}")
-            print(f"  Normalized volume to: {float(np.min(self._volumes)):.2f} - {float(np.max(self._volumes)):.2f}")
-            print(f"  Applied scale factor: {scale_factor:.6f}")
-            print(f"  Recommendation: Pre-scale volume data to max ~{target_max:.2f} for this price range.")
-
     # properties for nicer API
     @property
     def dates(self):
@@ -467,7 +452,7 @@ class PlotCandleStick(dcg.DrawInPlot):
     def dates(self, value):
         self._dates = value
         self._validate_lengths()
-        self._volume_digital_series.X = self._dates
+        self._update_volume_series()
         self.render()
 
     @property
@@ -489,6 +474,7 @@ class PlotCandleStick(dcg.DrawInPlot):
     def opens(self, value):
         self._opens = value
         self._validate_lengths()
+        self._update_volume_series()
         self.render()
 
     @property
@@ -499,6 +485,7 @@ class PlotCandleStick(dcg.DrawInPlot):
     def closes(self, value):
         self._closes = value
         self._validate_lengths()
+        self._update_volume_series()
         self.render()
 
     @property
@@ -529,6 +516,7 @@ class PlotCandleStick(dcg.DrawInPlot):
     def volumes(self, value):
         self._volumes = value
         self._validate_lengths()
+        self._update_volume_series()
         self.render()
 
     @property
