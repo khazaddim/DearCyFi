@@ -24,4 +24,4 @@
 Until CI is configured with the required custom DearCyGui build, run validation with the repository's `.venv-dcg` environment rather than the default `.venv` environment.
 
 - [x] 4.1 Using `.venv-dcg`, run the focused automated tests for cursor conversion, formatting, candle color lookup, and existing time-collapse regression tests.
-- [ ] 4.2 Using `.venv-dcg`, manually verify in the DearCyFi demo that the tag follows the pointer before and after collapse, displays each configured timestamp format, changes green/red/blue with candle context, disappears outside the plot, and does not duplicate the stock corner readout.
+- [X] 4.2 Using `.venv-dcg`, manually verify in the DearCyFi demo that the tag follows the pointer before and after collapse, displays each configured timestamp format, changes green/red/blue with candle context, disappears outside the plot, and does not duplicate the stock corner readout.
