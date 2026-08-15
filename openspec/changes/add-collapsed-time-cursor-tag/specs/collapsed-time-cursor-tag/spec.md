@@ -46,18 +46,18 @@ The cursor tag SHALL support a configurable `DateTimeSpec` or a custom callable 
 - **AND** cursor labels remain consistent with collapsed-axis tick conversion
 
 ### Requirement: Candle-Aware Tag Color
-The cursor tag SHALL indicate candle direction using configurable bullish, bearish, and no-candle background colors that default to green, red, and blue respectively.
+The cursor tag SHALL indicate candle direction using configurable bullish, bearish, and no-candle background colors that default to green, red, and blue respectively. Each candle's semantic color band SHALL extend by half the median positive spacing between currently rendered candle centers on each side of its center.
 
 #### Scenario: Cursor is over a bullish candle
-- **WHEN** the cursor's plotted X coordinate falls within the rendered horizontal body bounds of a candle whose close is greater than or equal to its open
+- **WHEN** the cursor's plotted X coordinate falls within the horizontal semantic color band of a candle whose close is greater than or equal to its open
 - **THEN** the cursor tag uses the configured bullish background color
 
 #### Scenario: Cursor is over a bearish candle
-- **WHEN** the cursor's plotted X coordinate falls within the rendered horizontal body bounds of a candle whose close is less than its open
+- **WHEN** the cursor's plotted X coordinate falls within the horizontal semantic color band of a candle whose close is less than its open
 - **THEN** the cursor tag uses the configured bearish background color
 
 #### Scenario: Cursor is not over a candle
-- **WHEN** no rendered candle body contains the cursor's plotted X coordinate
+- **WHEN** no candle's semantic color band contains the cursor's plotted X coordinate
 - **THEN** the cursor tag uses the configured no-candle background color
 - **AND** that color is blue by default
 
@@ -66,7 +66,7 @@ The cursor tag SHALL indicate candle direction using configurable bullish, beari
 - **THEN** the cursor tag uses the configured no-candle background color
 
 #### Scenario: Resolve overlapping candle bounds
-- **WHEN** more than one rendered candle body contains the cursor's plotted X coordinate
+- **WHEN** more than one candle's semantic color band contains the cursor's plotted X coordinate
 - **THEN** the candle with the nearest plotted center determines the tag color
 
 #### Scenario: Preserve lookup after time collapse

@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,11 @@ class DearCyFi(dcg.Plot):
         context: dcg.Context,
         *,
         on_status=None,
+        collapsed_time_cursor_tag: bool = True,
+        cursor_tag_formatter: locator_time3.DateTimeSpec | Callable[[float], str] | None = None,
+        cursor_tag_bullish_color=(0, 255, 0, 255),
+        cursor_tag_bearish_color=(255, 0, 0, 255),
+        cursor_tag_no_candle_color=(0, 0, 255, 255),
         use_local_time: bool = True,
         use_24_hour: bool = False,
         use_iso8601: bool = False,
@@ -119,6 +125,14 @@ class DearCyFi(dcg.Plot):
         self._time_series: dict[str, TimeSeriesRegistration] = {}
         self._collapse_source_id: str | None = None
         self._last_resize_time_format_info: dict[str, object] = {}
+        self._cursor_tag_formatter = self._coerce_cursor_tag_formatter(cursor_tag_formatter)
+        self._cursor_tag_bullish_color = dcg.color_as_int(cursor_tag_bullish_color)
+        self._cursor_tag_bearish_color = dcg.color_as_int(cursor_tag_bearish_color)
+        self._cursor_tag_no_candle_color = dcg.color_as_int(cursor_tag_no_candle_color)
+        self._cursor_tag_enabled = False
+        self._cursor_tag_handlers_installed = False
+        self._cursor_tag_prior_no_mouse_pos = None
+        self.cursor_tag = None
 
         self.time_format_level0: tuple = tuple(locator_time3.TIME_FORMAT_LEVEL0)
         self.time_format_level1: tuple = tuple(locator_time3.TIME_FORMAT_LEVEL1)
@@ -164,10 +178,187 @@ class DearCyFi(dcg.Plot):
         self.handlers += [
             dcg.AxesResizeHandler(context, callback=self.axes_resize_callback),
         ]
+        self.cursor_tag_enabled = collapsed_time_cursor_tag
+
+    @staticmethod
+    def _default_cursor_tag_formatter() -> locator_time3.DateTimeSpec:
+        return locator_time3.DateTimeSpec(locator_time3.DATE_DAY_MO_YR, locator_time3.TIMEFMT_HR_MIN)
+
+    def _coerce_cursor_tag_formatter(
+        self,
+        formatter: locator_time3.DateTimeSpec | Callable[[float], str] | None,
+    ) -> locator_time3.DateTimeSpec | Callable[[float], str]:
+        if formatter is None:
+            return self._default_cursor_tag_formatter()
+        if isinstance(formatter, locator_time3.DateTimeSpec):
+            return formatter
+        if callable(formatter):
+            return formatter
+        raise TypeError("cursor_tag_formatter must be a DateTimeSpec, callable, or None")
+
+    def _install_cursor_tag_handlers(self) -> None:
+        if self._cursor_tag_handlers_installed:
+            return
+        self.handlers += [
+            dcg.MouseMoveHandler(self.context, callback=self._handle_cursor_tag_mouse_move),
+        ]
+        self._cursor_tag_handlers_installed = True
+
+    def _ensure_cursor_tag(self) -> None:
+        if self.cursor_tag is not None:
+            return
+        with self.X1:
+            self.cursor_tag = dcg.AxisTag(
+                self.context,
+                coord=0.0,
+                text="",
+                bg_color=self._cursor_tag_no_candle_color,
+            )
+        self.cursor_tag.show = False
+
+    def _set_cursor_tag_visible(self, visible: bool) -> None:
+        if self.cursor_tag is not None:
+            self.cursor_tag.show = bool(visible)
+
+    @property
+    def cursor_tag_enabled(self) -> bool:
+        return self._cursor_tag_enabled
+
+    @cursor_tag_enabled.setter
+    def cursor_tag_enabled(self, value: bool) -> None:
+        enabled = bool(value)
+        if enabled == self._cursor_tag_enabled:
+            return
+        self._cursor_tag_enabled = enabled
+        if enabled:
+            self._install_cursor_tag_handlers()
+            self._ensure_cursor_tag()
+            self._cursor_tag_prior_no_mouse_pos = bool(getattr(self, "no_mouse_pos", False))
+            self.no_mouse_pos = True
+        else:
+            self._set_cursor_tag_visible(False)
+            if self._cursor_tag_prior_no_mouse_pos is not None:
+                self.no_mouse_pos = bool(self._cursor_tag_prior_no_mouse_pos)
+                self._cursor_tag_prior_no_mouse_pos = None
+
+    @property
+    def cursor_tag_formatter(self) -> locator_time3.DateTimeSpec | Callable[[float], str]:
+        return self._cursor_tag_formatter
+
+    @cursor_tag_formatter.setter
+    def cursor_tag_formatter(self, value: locator_time3.DateTimeSpec | Callable[[float], str] | None) -> None:
+        self._cursor_tag_formatter = self._coerce_cursor_tag_formatter(value)
+
+    @property
+    def cursor_tag_bullish_color(self):
+        return self._cursor_tag_bullish_color
+
+    @cursor_tag_bullish_color.setter
+    def cursor_tag_bullish_color(self, value) -> None:
+        self._cursor_tag_bullish_color = dcg.color_as_int(value)
+
+    @property
+    def cursor_tag_bearish_color(self):
+        return self._cursor_tag_bearish_color
+
+    @cursor_tag_bearish_color.setter
+    def cursor_tag_bearish_color(self, value) -> None:
+        self._cursor_tag_bearish_color = dcg.color_as_int(value)
+
+    @property
+    def cursor_tag_no_candle_color(self):
+        return self._cursor_tag_no_candle_color
+
+    @cursor_tag_no_candle_color.setter
+    def cursor_tag_no_candle_color(self, value) -> None:
+        self._cursor_tag_no_candle_color = dcg.color_as_int(value)
+        if self.cursor_tag is not None and not self.cursor_tag.show:
+            self.cursor_tag.bg_color = self._cursor_tag_no_candle_color
 
     def _set_status(self, message: str) -> None:
         if callable(self._on_status):
             self._on_status(str(message))
+
+    def expand_cursor_plot_x_to_real_time(self, x_coord: float) -> float:
+        x_value = float(x_coord)
+        if not np.isfinite(x_value):
+            raise ValueError("cursor x coordinate must be finite")
+        if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
+            return float(self._gap_manager.time_map.expand(x_value))
+        return x_value
+
+    def format_cursor_timestamp(self, real_timestamp: float) -> str:
+        timestamp = float(real_timestamp)
+        if not np.isfinite(timestamp):
+            raise ValueError("cursor timestamp must be finite")
+        formatter = self._cursor_tag_formatter
+        if isinstance(formatter, locator_time3.DateTimeSpec):
+            use_24_hour = bool(self._time_locator_use_24_hour or getattr(formatter, "use_24_hour", False))
+            use_iso8601 = bool(self._time_locator_use_iso8601 or getattr(formatter, "use_iso8601", False))
+            return locator_time3.format_datetime(
+                locator_time3.ImPlotTime.from_double(timestamp),
+                formatter,
+                use_local_time=self._time_locator_use_local_time,
+                use_24_hour=use_24_hour,
+                use_iso8601=use_iso8601,
+            )
+        text = formatter(timestamp)
+        if not isinstance(text, str):
+            raise TypeError("cursor_tag_formatter callable must return a string")
+        return text
+
+    def format_cursor_tag_text_for_plot_x(self, x_coord: float) -> str:
+        return self.format_cursor_timestamp(self.expand_cursor_plot_x_to_real_time(x_coord))
+
+    def get_cursor_tag_state_for_plot_x(self, x_coord: float) -> dict[str, object]:
+        x_value = float(x_coord)
+        text = self.format_cursor_tag_text_for_plot_x(x_value)
+        bg_color = self._cursor_tag_no_candle_color
+        if self.candlestick_plot is not None:
+            direction = self.candlestick_plot.get_candle_direction_for_x(x_value)
+            if direction == "bullish":
+                bg_color = self._cursor_tag_bullish_color
+            elif direction == "bearish":
+                bg_color = self._cursor_tag_bearish_color
+        return {
+            "coord": x_value,
+            "real_timestamp": self.expand_cursor_plot_x_to_real_time(x_value),
+            "text": text,
+            "bg_color": bg_color,
+        }
+
+    def _update_cursor_tag_from_plot_x(self, x_coord: float) -> None:
+        if not self._cursor_tag_enabled:
+            return
+        x_value = float(x_coord)
+        if not np.isfinite(x_value):
+            self._set_cursor_tag_visible(False)
+            return
+        self._ensure_cursor_tag()
+        state = self.get_cursor_tag_state_for_plot_x(x_value)
+        self.cursor_tag.coord = state["coord"]
+        self.cursor_tag.text = state["text"]
+        self.cursor_tag.bg_color = state["bg_color"]
+        self._set_cursor_tag_visible(True)
+
+    def _cursor_is_inside_plot(self, x_coord: float, y_coord: float) -> bool:
+        x_value = float(x_coord)
+        y_value = float(y_coord)
+        if not np.isfinite(x_value) or not np.isfinite(y_value):
+            return False
+        x_min, x_max = sorted((float(self.X1.min), float(self.X1.max)))
+        y_min, y_max = sorted((float(self.Y1.min), float(self.Y1.max)))
+        return x_min <= x_value <= x_max and y_min <= y_value <= y_max
+
+    def _handle_cursor_tag_mouse_move(self, *_args) -> None:
+        x_coord = float(self.X1.mouse_coord)
+        y_coord = float(self.Y1.mouse_coord)
+        if not self._cursor_is_inside_plot(x_coord, y_coord):
+            self._set_cursor_tag_visible(False)
+            self.context.viewport.wake(full_refresh=True)
+            return
+        self._update_cursor_tag_from_plot_x(x_coord)
+        self.context.viewport.wake(full_refresh=True)
 
     @property
     def time_series_ids(self) -> tuple[str, ...]:

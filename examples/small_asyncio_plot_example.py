@@ -89,6 +89,11 @@ async def mouse_callback(sender, target, data):
     # Change the tag text to be the x value of the mouse position
     if x_tag is not None:
         x_tag.text = f"{plot.X1.mouse_coord:.2f}"
+    # Hiding DearCyGui's stock mouse-coordinate display disables the plot's
+    # automatic force-present path. Wake the viewport so AxisTag changes made
+    # by this mouse callback are presented immediately.
+    C.viewport.wake(full_refresh=True)  # if we don't do this, the tag will not update until the next mouse move event, like moving the mouse out of the plot and back in.
+    # This is because the viewport is waiting for input and will not refresh until it receives input. By waking the viewport, we force it to refresh immediately, which allows the tag to update immediately.
 
 async def clicked_callback(sender, target, data):
     print('Mouse clicked at:', plot.X1.mouse_coord, plot.Y1.mouse_coord)

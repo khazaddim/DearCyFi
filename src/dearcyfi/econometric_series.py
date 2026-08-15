@@ -135,7 +135,7 @@ class PlotEconometricSeries:
         with dcg.utils.TemporaryTooltip(
             self.context,
             target=target,
-            parent=target.parent.parent,
+            parent=target.parent,
         ):
             dcg.Text(self.context, value=self._label)
             dcg.Text(self.context, value=f"Date: {self._time_formatter(source_date)}")

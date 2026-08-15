@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Callable
 import dearcygui as dcg
 import numpy as np
 from collections.abc import Sized
@@ -207,6 +208,50 @@ class PlotCandleStick(dcg.DrawInPlot):
                 return float(np.median(deltas) * self._weight * 2.0)
         return max(self._weight * 2.0, np.finfo(float).eps)
 
+    def _body_half_width(self) -> float:
+        dates = np.asarray(self._dates, dtype=float)
+        if dates.size > 1:
+            return float(dates[1] - dates[0]) * float(self._weight)
+        return float(self._weight)
+
+    def _color_band_half_width(self) -> float:
+        median_delta = _median_candle_delta_seconds(self._dates)
+        if median_delta is not None:
+            return median_delta * 0.5
+        return abs(self._body_half_width())
+
+    def get_candle_index_for_x(self, x_coord: float) -> int | None:
+        dates = np.asarray(self._dates, dtype=float)
+        if dates.size == 0:
+            return None
+
+        x_value = float(x_coord)
+        if not np.isfinite(x_value):
+            return None
+
+        half_width = self._color_band_half_width()
+        left = np.searchsorted(dates, x_value - half_width, side="left")
+        right = np.searchsorted(dates, x_value + half_width, side="right")
+        if left >= right:
+            return None
+
+        candidates = list(range(left, right))
+        inside = [
+            index for index in candidates
+            if abs(float(dates[index]) - x_value) <= half_width
+        ]
+        if not inside:
+            return None
+        return min(inside, key=lambda index: abs(float(dates[index]) - x_value))
+
+    def get_candle_direction_for_x(self, x_coord: float) -> str | None:
+        index = self.get_candle_index_for_x(x_coord)
+        if index is None:
+            return None
+        open_value = float(np.asarray(self._opens, dtype=float)[index])
+        close_value = float(np.asarray(self._closes, dtype=float)[index])
+        return "bullish" if close_value >= open_value else "bearish"
+
     def _normalized_volumes(self) -> np.ndarray:
         volumes = np.asarray(self._volumes, dtype=float)
         if volumes.size == 0:
@@ -303,7 +348,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         data = target.user_data
         if self._tooltip:
             with dcg.utils.TemporaryTooltip(self.context, target=target,
-                                            parent=self.parent.parent):
+                                            parent=target.parent):
                 dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
                 dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
                 dcg.Text(self.context, value=f"Close: {data[2]:.2f}")
