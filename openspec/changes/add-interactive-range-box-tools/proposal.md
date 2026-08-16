@@ -13,10 +13,11 @@ The rectangle proof of concept proves that DearCyGui invisible hit regions can p
 - Add generic chart ownership plus chart-level `add_box(...)`, `remove_all_boxes()`, and box-diagnostic conveniences and read-only access to active tools and boxes.
 - Keep every managed box synchronized when time is collapsed, restored, or candle data is replaced.
 - Associate boxes with the chart's candle series and expose changing and committed geometry hooks suitable for later corner labels, candle selection, and price-volume calculations.
+- Add chart-managed anchor tooltips composed of simple text rows for semantic anchor identity, real date/time, and price while avoiding the parent and duplicate-hover races fixed in candle tooltips.
 - Add a `Technical Analysis` control group beside the demo's existing data and collapse controls with `Add Box`, `Print Boxes`, and `Remove All Boxes` commands.
 - Add focused automated tests and a manual demo validation path for interaction, lifecycle, and collapse round trips.
 
-The initial change does not implement Fibonacci levels, head-and-shoulders recognition, corner date/price labels, persistence, undo/redo, or candle price-volume aggregation.
+The initial change does not implement Fibonacci levels, head-and-shoulders recognition, persistent plot labels, persistence, undo/redo, or candle price-volume aggregation. Persistent labels require separate decisions about location, style, collision, and text scaling under zoom; hover tooltips do not.
 
 ## Impact
 

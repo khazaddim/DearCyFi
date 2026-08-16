@@ -8,6 +8,7 @@
 - [ ] 1.5 Add source-to-plot projection, plot-to-source expansion, screen-space hit sizing, cursor feedback, and separate changing/committed geometry callbacks.
 - [ ] 1.6 Route programmatic geometry mutation through the same validation, refresh, and committed-callback path.
 - [ ] 1.7 Export the stable anchor, lifecycle, and range-box types from `dearcyfi`.
+- [ ] 1.8 Expose semantic anchor roles and immutable current-anchor lookup for tooltip and future label consumers.
 
 ## 2. DearCyFi Ownership and Collapse Lifecycle
 
@@ -17,6 +18,8 @@
 - [ ] 2.4 Refresh every registered tool through the generic lifecycle after collapse, restore, and candle replacement without registering anchors as collapse-source series.
 - [ ] 2.5 Define clear behavior for missing candles, invalid geometry, and boxes outside replacement candle ranges.
 - [ ] 2.6 Add immutable box diagnostic snapshots and a callback-friendly `print_boxes()` command reporting stable IDs, canonical source geometry, and current plotted geometry.
+- [ ] 2.7 Add one chart-managed anchor-tooltip coordinator with explicit active target ownership, plot-compatible parenting, owner-checked hover cleanup, and teardown before projection rebuild or disposal.
+- [ ] 2.8 Add anchor-tooltip enablement and candle-style `dcg.Text` rows using chart-consistent source-date formatting and a basic numeric price format.
 
 ## 3. Demo Controls
 
@@ -27,9 +30,10 @@
 
 ## 4. Validation and Documentation
 
-- [ ] 4.1 Add focused tests for anchor and geometry validation, move/resize updates, changing/committed callback phases, programmatic mutation, and disposal.
+- [ ] 4.1 Add focused tests for anchor and geometry validation, move/resize updates, changing/committed callback phases, semantic anchor lookup, programmatic mutation, and disposal.
 - [ ] 4.2 Add chart tests for stable identity, generic registration/refresh, filtered box access, add-many, diagnostic snapshots/output including the empty state, box-only remove-all idempotence, missing-candle errors, and current candle resolution.
 - [ ] 4.3 Add collapse/restore/reload tests asserting canonical source anchors and rendered plot anchors remain coherent.
-- [ ] 4.4 Run the focused tests and the existing collapse, candle, econometric, and axis-assignment regression tests.
-- [ ] 4.5 Run the demo and manually verify add, independent interaction, source/rendered coordinate printing before and after collapse, restore, and remove-all behavior.
-- [ ] 4.6 Document the range-box API, source-time geometry semantics, callbacks, and deferred Fibonacci/label/aggregation goals.
+- [ ] 4.4 Add anchor-tooltip tests for canonical dates after collapse, current prices after movement, duplicate `GotHover`, target switching, stale `LostHover`, correct parent ownership, rebuild cleanup, and tool disposal.
+- [ ] 4.5 Run the focused tests and the existing collapse, candle, econometric, and axis-assignment regression tests.
+- [ ] 4.6 Run the demo and manually verify add, independent interaction, anchor coordinate tooltips before and after collapse, source/rendered coordinate printing, restore, and remove-all behavior.
+- [ ] 4.7 Document the range-box API, source-time geometry semantics, callbacks, simple hover tooltips, and deferred Fibonacci/persistent-label/aggregation goals.

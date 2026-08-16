@@ -17,16 +17,18 @@ The demo also needs callback-friendly chart commands that can be wired to contro
 - Preserve canonical source-time anchors across collapse, restore, and candle reload operations.
 - Provide simple chart-level add/remove-all commands for host controls.
 - Establish geometry and lifecycle hooks that future Fibonacci, labels, and candle calculations can reuse.
+- Provide reusable coordinate tooltips for semantic anchors with explicit parent and lifecycle ownership.
 - Keep plot pan and zoom available outside semantic box hit regions.
 
 ### Non-Goals
 
 - Fibonacci retracement levels or specialized Fibonacci interaction.
-- Corner date/price label rendering.
+- Persistent anchor date/price labels that remain visible without hover.
 - Price-volume, volume-profile, or other candle aggregation.
 - Persistence, serialization, selection sets, undo/redo, or keyboard deletion.
 - A general plugin system for technical-analysis tools.
 - Pattern recognition, automatic anchor placement, or a shared renderer for unrelated tool shapes.
+- Persistent plot-label placement, styling, collision handling, or zoom-dependent text scaling.
 
 ## Decisions
 
@@ -158,6 +160,29 @@ The production tool follows the proven DearCyGui pattern:
 
 Broad hit regions are created before corner hit regions so corners win overlap priority. The initial production tool retains the PoC's four-corner scope; edge handles can be added later if needed.
 
+### Decision: Manage Anchor Tooltips at Chart Scope
+
+Hovering a semantic anchor displays a compact `dcg.Tooltip` populated with ordinary `dcg.Text` rows, following the candle utility pattern. The initial rows contain:
+
+- `Tool`: the tool kind and stable tool ID;
+- `Anchor`: the semantic role, such as `top-left` or `bottom-right`;
+- `Date`: the canonical source date/time formatted through the chart's existing date/time formatter; and
+- `Price`: the current Y coordinate using a simple fixed numeric format.
+
+The displayed date/time always comes from canonical `ToolAnchor.source_x`, not the collapsed plot X coordinate. Plot-space diagnostics remain in `print_boxes()` rather than the hover tooltip. Tooltip content is derived from current geometry and updates when an actively hovered anchor moves.
+
+The implementation SHALL carry forward the tooltip fixes verified in candle utility commit `d31b088`:
+
+1. Create `dcg.Tooltip` with a parent compatible with the containing plot/window hierarchy, resolved from the tool/chart ownership path. Do not use the anchor button's immediate drawing parent merely because it is locally available.
+2. Maintain explicit active-tooltip and active-target state. Duplicate `GotHover` delivery for the same target reuses the active tooltip instead of creating duplicate coordinate blocks.
+3. Switching directly between anchor targets clears the previous tooltip before creating the next one.
+4. `LostHover` clears the tooltip only when the lost target is still its owner, preventing a late event from deleting a newer target's tooltip.
+5. Projection refresh, geometry-child rebuild, tool disposal, and bulk removal clear any tooltip owned by affected items before deleting or replacing those items.
+
+Because anchors from different tools can overlap, active anchor-tooltip ownership belongs to one chart-level coordinator rather than independent per-tool tooltip instances. The chart enforces at most one technical-analysis anchor tooltip at a time. Tools provide immutable current anchor data to that coordinator; they do not expose tooltip internals as public API.
+
+Anchor tooltips have an enable flag and are enabled by default for the initial range box. This change does not add a tooltip style or formatter API: the implementation reuses the chart's existing date/time formatting and a basic price format. This hover-only feature is distinct from future persistent labels, which require placement, appearance, collision, and zoom-scaling design.
+
 ### Decision: Put Demo Commands in a Dedicated Control Group
 
 Add a `Technical Analysis` collapsing header in the demo sidebar near `Collapsing Controls`. It contains `Add Box`, `Print Boxes`, and `Remove All Boxes` buttons wired to the chart methods. It is not registered in `DATA_WIDGETS`, because it neither discovers nor loads data and must not acquire provider lifecycle semantics.
@@ -171,6 +196,7 @@ The Add command uses chart-derived default geometry, making it useful without a 
 - A large body hit region can reduce plot-pan access. The body region should be inset and handles should remain small, leaving the surrounding plot interactive.
 - Candle replacement can move the useful data range away from existing source anchors. Boxes preserve their source geometry rather than silently changing analytical meaning; hosts can call `remove_all_boxes()` when replacement should clear annotations.
 - A base class can become a premature hierarchy. The shared contract is therefore limited to identity, source-coordinate projection lifecycle, and disposal; drawing composition and semantic geometry stay concrete.
+- Tooltip events can arrive in duplicate or stale order while drawing children are rebuilt. Explicit chart-level target ownership and owner-checked clearing prevent duplicate blocks and late `LostHover` cleanup from deleting a newer tooltip.
 
 ## Migration Plan
 

@@ -168,6 +168,63 @@ Each range box SHALL expose immutable source-space geometry and SHALL support di
 - **THEN** it can use the preserved source timestamps and price bounds
 - **AND** does not need to interpret collapsed plot coordinates as real timestamps
 
+### Requirement: Anchor Coordinate Tooltips
+DearCyFi SHALL display a hover tooltip for technical-analysis anchors using simple text rows containing the tool identity, semantic anchor role, canonical source date/time, and current price coordinate.
+
+#### Scenario: Hover an anchor without collapsed time
+- **WHEN** anchor tooltips are enabled and the pointer enters a range-box corner anchor
+- **THEN** one tooltip presents `Tool`, `Anchor`, `Date`, and `Price` text rows
+- **AND** the date uses the chart's existing date/time formatting
+- **AND** the price uses a basic numeric format
+
+#### Scenario: Hover an anchor with collapsed time
+- **WHEN** the chart is collapsed and the pointer enters an anchor rendered at a projected X coordinate
+- **THEN** the tooltip date/time is formatted from the anchor's canonical source timestamp
+- **AND** the projected plot X coordinate is not presented as real time
+
+#### Scenario: Keep tooltip presentation simple
+- **WHEN** an anchor coordinate tooltip is created
+- **THEN** its content uses ordinary tooltip text children like candle tooltips
+- **AND** it does not require plot-label positioning, collision handling, zoom-dependent text scaling, or a separate style system
+
+#### Scenario: Move a hovered anchor
+- **WHEN** an anchor moves while its tooltip remains active
+- **THEN** tooltip coordinate content reflects the current canonical anchor geometry
+- **AND** does not retain the pre-drag date or price
+
+#### Scenario: Disable anchor tooltips
+- **WHEN** anchor tooltips are disabled for the chart or tool
+- **THEN** hovering its anchor does not create a coordinate tooltip
+- **AND** anchor dragging and cursor feedback remain available
+
+### Requirement: Race-Safe Anchor Tooltip Lifecycle
+The chart SHALL coordinate technical-analysis anchor tooltips with explicit active-target ownership, a plot-compatible tooltip parent, and at most one active anchor tooltip at a time.
+
+#### Scenario: Receive duplicate hover-enter events
+- **WHEN** the active anchor receives repeated `GotHover` events before a matching leave event
+- **THEN** the existing tooltip is reused or refreshed
+- **AND** duplicate coordinate blocks are not created
+
+#### Scenario: Switch between overlapping anchors
+- **WHEN** hover ownership changes directly from one anchor target to another
+- **THEN** the prior tooltip is cleared before the new tooltip is created
+- **AND** only the new target's coordinates remain visible
+
+#### Scenario: Receive a stale hover-leave event
+- **WHEN** a prior target emits `LostHover` after a newer target owns the tooltip
+- **THEN** the newer target's tooltip remains active
+- **AND** only its owning target can clear it through hover leave
+
+#### Scenario: Parent a tooltip from a drawing child
+- **WHEN** an anchor button nested under drawing containers creates a tooltip
+- **THEN** the tooltip uses the chart-resolved plot/window-compatible parent
+- **AND** does not use an incompatible immediate drawing parent
+
+#### Scenario: Rebuild or dispose tooltip owners
+- **WHEN** projection refresh, child rebuild, tool disposal, or bulk removal affects an anchor owning the active tooltip
+- **THEN** the tooltip is cleared before the target is replaced or deleted
+- **AND** no stale tooltip or target reference remains
+
 ### Requirement: Demo Technical-Analysis Controls
 The DearCyFi demo SHALL provide `Add Box`, `Print Boxes`, and `Remove All Boxes` commands in a dedicated technical-analysis control group near the existing data and collapse controls.
 
