@@ -348,6 +348,11 @@ The reference utilities read callback fields while holding `self.mutex`, then re
 
 The current best local rectangle example is `examples/TA/TA_PoC_Invis_Btns.py`.
 
+Relevant history:
+
+- `fb9effd` - initial invisible-button TA rectangle proof of concept
+- `9502e7e` - improved the PoC and updated the skill toward one-shot movable box generation
+
 Use it as a DearCyFi-owned reference for a small interactive tool class built from visible drawing items plus internal invisible hit regions.
 
 What this example demonstrates:
@@ -369,6 +374,162 @@ Important distinction:
 - `examples/TA/TA_PoC_Invis_Btns.py` is the project-specific rectangle PoC showing how that pattern maps into DearCyFi technical-indicator work.
 
 When adapting this example into production code, keep the interaction architecture but move the class into project-owned source under `src/dearcyfi/`, tighten the public API, and replace PoC status-text updates with real callbacks or application hooks.
+
+## Lessons From Production RangeBoxTool
+
+The first package-owned `RangeBoxTool` in `src/dearcyfi/range_box_tools.py` exposed a few production concerns that are not obvious from `draw_draggable.py` or the early PoC alone.
+
+Archived OpenSpec reference:
+
+- `openspec/changes/archive/2026-08-16-add-interactive-range-box-tools/`
+- promoted capability spec: `openspec/specs/interactive-range-box-tools/spec.md`
+
+Relevant history:
+
+- `a1e26a9` - separated source dates from rendered dates in candles, which became the prerequisite for canonical source-time tool geometry
+- `4907b99` - OpenSpec/design checkpoint that added technical-anchor tooltip requirements and tasks
+- `d31b088` - fixed the candle tooltip duplicate/race-condition lifecycle that later informed chart-owned anchor tooltip coordination
+- `6dd0297` - package-owned interactive range-box tool implementation in `src/dearcyfi/range_box_tools.py`, chart wiring in `src/dearcyfi/core.py`, and focused tests in `tests/test_interactive_range_box_tools.py`
+
+### Own The Plot Layer Explicitly
+
+Creating a `DrawInPlot` or other drawing container is not enough by itself. The tool layer must be attached to the chart or plot in the construction path.
+
+Bad shape:
+
+```python
+self._layer = dcg.DrawInPlot(context)
+with self._layer:
+	...
+```
+
+Preferred shape:
+
+```python
+with chart:
+	self._layer = dcg.DrawInPlot(context, axes=(dcg.Axis.X1, y_axis))
+	with self._layer:
+		...
+```
+
+If the layer is not parented into the plot tree, interaction code may run and tests may partially pass, but nothing will render on screen.
+
+### Separate Canonical Geometry From Rendered Geometry
+
+For DearCyFi indicators that live on a collapsed time axis, keep two coordinate spaces:
+
+- Canonical source geometry: real timestamps plus Y-axis values.
+- Rendered plot geometry: projected X coordinates plus plotted Y values.
+
+Do not store collapsed plot X values as the only truth for the tool. Store canonical anchors first, then derive rendered anchors from the chart's current collapse map.
+
+This matters for:
+
+- collapse and restore round trips
+- candle replacement
+- tooltip dates
+- later analytics such as Fibonacci levels or candle selection
+
+### Treat Anchor Roles As Semantic, Not Fixed Corners
+
+The PoC taught the inversion lesson, but production code made the rule more explicit:
+
+- a drag starts from one semantic anchor role
+- the opposite anchor stays fixed for that drag
+- if the dragged point crosses the opposite anchor, resolve which semantic role it has become
+
+Do not assume `top_left` must remain the top-left corner throughout the drag. During an invertible drag, the active role can change to `bottom_right`, `bottom_left`, or `top_right` depending on which side of the fixed anchor the dragged point ends up on.
+
+This is the right basis for future tools with labeled anchors, not just boxes.
+
+### Compute Drag Results From Backup Geometry Only
+
+The skill already says to use backup geometry plus cumulative deltas. The production tool reinforced one more detail:
+
+- both the live drag path and the drag-release path must read from the same drag-start backup geometry
+- release must not recompute from already-mutated current geometry, or the delta gets applied twice
+
+If a tool supports inversion or role switching, this rule becomes even more important.
+
+### Default Insertion Geometry Should Come From The Current View
+
+For chart-managed tools created from UI buttons such as `Add Box`, the best default is usually not a hard-coded data slice. Prefer:
+
+1. current visible X and Y span if the plot view is initialized
+2. fallback to loaded series extents if the view range is not yet usable
+
+The current DearCyFi box uses a centered default region sized to about 20% of the visible horizontal and vertical span.
+
+This pattern should generalize well to trend lines, Fibonacci tools, and pattern markers.
+
+### Tooltip Parent Resolution Must Follow The Owning UI Container
+
+Tooltip parenting for draw children inside plots is easy to get wrong. The immediate draw parent is not always a compatible tooltip parent.
+
+Use the candle-tooltip lesson here:
+
+- resolve the tooltip parent from the owning chart or higher compatible UI container
+- keep one explicit active tooltip owner
+- clear the tooltip before rebuild, disposal, or target replacement
+
+For future TA tools, do not assume `target.parent` is enough.
+
+### Centralize Tooltip Ownership When A Tool Has Multiple Anchors
+
+Multi-anchor tools should usually not let each anchor manage an independent tooltip lifecycle. A chart-owned or tool-owned coordinator is safer because it can:
+
+- enforce one active tooltip at a time
+- ignore duplicate `GotHover`
+- survive hover switches between overlapping anchors
+- ignore stale `LostHover`
+- refresh displayed values while dragging
+
+This pattern is likely reusable for Fibonacci anchors, neckline points, and pattern control points.
+
+### Normalize Public Geometry Even If Interaction Allows Inversion
+
+The PoC kept raw corner coordinates and normalized only for display. The production `RangeBoxTool` instead normalizes geometry for the public API while still allowing invertible interaction.
+
+That split is useful:
+
+- interaction may cross and change semantic roles
+- stored/public geometry remains normalized and predictable
+- consumers such as diagnostics, callbacks, and future analytics do not need to reason about negative width or height
+
+For future indicators, decide explicitly whether raw interaction geometry or normalized public geometry is the better contract.
+
+### Add Tests For Interaction Semantics, Not Just Geometry Math
+
+The production work showed that the fragile parts are not only coordinate calculations. Add focused tests for:
+
+- duplicate hover enter
+- stale hover leave
+- tooltip parent resolution
+- live tooltip refresh during drag
+- role switching after inversion
+- collapse, restore, and data-replacement refresh
+- default insertion geometry from the visible view
+
+These are the tests that catch the real integration failures.
+
+## Recommended DearCyFi Extensions To This Skill
+
+When using this skill for future package-owned indicators such as Fibonacci retracements or head-and-shoulders guides, also consider these DearCyFi-specific design questions up front:
+
+1. What is the canonical source-space geometry contract?
+2. Which anchors are semantic roles, and can they switch roles during inversion?
+3. Which tool state belongs on the tool instance, and which lifecycle concerns belong on the chart?
+4. Does the tool need a chart-owned tooltip coordinator or shared status/selection manager?
+5. What is the default insertion geometry when the user clicks a toolbar button?
+6. What collapse or candle-replacement refresh hook must the chart call for this tool?
+
+## Skill Evolution References
+
+If you want the prompt and guidance history for this skill itself, these commits are the useful checkpoints:
+
+- `3048a18` - initial `draw_draggable`-oriented skill
+- `9502e7e` - expanded the skill around the local rectangle PoC
+- `b4b809d` - added a direct reference back to the project-owned indicator work
 
 ## Adaptation Recipe For DearCyFi Tools
 
