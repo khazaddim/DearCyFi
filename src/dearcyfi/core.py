@@ -10,6 +10,7 @@ import numpy as np
 from .PyTimeLocator import locator_time3
 from .DCG_Candle_Utils import PlotCandleStick
 from .candle_utils.gap_utils import GapCollapseManager
+from .range_box_tools import AnchorTooltipCoordinator, InteractiveTool, RangeBoxDiagnosticSnapshot, RangeBoxGeometry, RangeBoxTool
 
 
 def _generate_sample_bar_data(num_bars, y_min, y_max, x_min, x_max):
@@ -124,6 +125,11 @@ class DearCyFi(dcg.Plot):
         self._gap_manager = GapCollapseManager()
         self._time_series: dict[str, TimeSeriesRegistration] = {}
         self._collapse_source_id: str | None = None
+        self._tools: list[InteractiveTool] = []
+        self._tool_ids: set[str] = set()
+        self._next_tool_number = 1
+        self._anchor_tooltips_enabled = True
+        self._anchor_tooltip_coordinator = AnchorTooltipCoordinator(self)
         self._last_resize_time_format_info: dict[str, object] = {}
         self._cursor_tag_formatter = self._coerce_cursor_tag_formatter(cursor_tag_formatter)
         self._cursor_tag_bullish_color = dcg.color_as_int(cursor_tag_bullish_color)
@@ -365,6 +371,24 @@ class DearCyFi(dcg.Plot):
         return tuple(self._time_series)
 
     @property
+    def tools(self) -> tuple[InteractiveTool, ...]:
+        return tuple(self._tools)
+
+    @property
+    def boxes(self) -> tuple[RangeBoxTool, ...]:
+        return tuple(tool for tool in self._tools if isinstance(tool, RangeBoxTool))
+
+    @property
+    def anchor_tooltips_enabled(self) -> bool:
+        return self._anchor_tooltips_enabled
+
+    @anchor_tooltips_enabled.setter
+    def anchor_tooltips_enabled(self, value: bool) -> None:
+        self._anchor_tooltips_enabled = bool(value)
+        if not self._anchor_tooltips_enabled:
+            self._anchor_tooltip_coordinator.clear()
+
+    @property
     def collapse_source_id(self) -> str | None:
         return self._collapse_source_id
 
@@ -402,6 +426,185 @@ class DearCyFi(dcg.Plot):
             self.restore_time_chart()
         self._time_series[series_id] = TimeSeriesRegistration(series, in_gap)
 
+    def register_tool(self, tool: InteractiveTool) -> InteractiveTool:
+        if not isinstance(tool, InteractiveTool):
+            raise TypeError("tool must implement InteractiveTool")
+        if tool.tool_id in self._tool_ids:
+            raise ValueError(f"Tool ID is already registered: {tool.tool_id!r}")
+        self._tools.append(tool)
+        self._tool_ids.add(tool.tool_id)
+        return tool
+
+    def _refresh_registered_tools(self) -> None:
+        for tool in self._tools:
+            tool.refresh_projection()
+
+    def _next_tool_id(self, tool_kind: str) -> str:
+        while True:
+            candidate = f"{tool_kind}-{self._next_tool_number}"
+            self._next_tool_number += 1
+            if candidate not in self._tool_ids:
+                return candidate
+
+    def _require_candles_loaded(self) -> PlotCandleStick:
+        if self.candlestick_plot is None:
+            raise RuntimeError("Cannot add a range box before candles are loaded")
+        return self.candlestick_plot
+
+    def _default_box_geometry(self) -> RangeBoxGeometry:
+        candle_plot = self._require_candles_loaded()
+        source_dates = np.asarray(candle_plot.source_dates, dtype=float)
+        if source_dates.size == 0:
+            raise RuntimeError("Cannot add a range box before candles are loaded")
+        data_x_min = float(np.min(source_dates))
+        data_x_max = float(np.max(source_dates))
+
+        x_min_plot = float(self.X1.min)
+        x_max_plot = float(self.X1.max)
+        view_x_usable = np.isfinite(x_min_plot) and np.isfinite(x_max_plot) and x_min_plot != x_max_plot
+        if view_x_usable:
+            x_min_source = self.expand_cursor_plot_x_to_real_time(min(x_min_plot, x_max_plot))
+            x_max_source = self.expand_cursor_plot_x_to_real_time(max(x_min_plot, x_max_plot))
+        else:
+            x_min_source = data_x_min
+            x_max_source = data_x_max
+
+        if x_min_source == x_max_source:
+            cadence = 60.0
+            if source_dates.size > 1:
+                spacing = np.diff(source_dates)
+                spacing = spacing[np.isfinite(spacing) & (spacing > 0)]
+                if spacing.size:
+                    cadence = float(np.median(spacing))
+            center_time = float(source_dates[source_dates.size // 2])
+            x_min_source = center_time - cadence * 2.0
+            x_max_source = center_time + cadence * 2.0
+
+        y_axis = candle_plot.y_axis
+        y_axis_obj = getattr(self, y_axis.name)
+        y_min_axis = float(y_axis_obj.min)
+        y_max_axis = float(y_axis_obj.max)
+        view_y_usable = np.isfinite(y_min_axis) and np.isfinite(y_max_axis) and y_min_axis != y_max_axis
+        if view_y_usable:
+            y_min = min(y_min_axis, y_max_axis)
+            y_max = max(y_min_axis, y_max_axis)
+        else:
+            y_min = float(np.min(self.lows))
+            y_max = float(np.max(self.highs))
+        if y_min == y_max:
+            y_min -= 1.0
+            y_max += 1.0
+
+        x_span = x_max_source - x_min_source
+        y_span = y_max - y_min
+        default_x_span = max(x_span * 0.2, 1.0)
+        default_y_span = max(y_span * 0.2, 0.01)
+        x_center = x_min_source + x_span * 0.5
+        y_center = y_min + y_span * 0.5
+        return RangeBoxGeometry(
+            left_time=x_center - default_x_span * 0.5,
+            bottom=y_center - default_y_span * 0.5,
+            right_time=x_center + default_x_span * 0.5,
+            top=y_center + default_y_span * 0.5,
+        )
+
+    def add_box(
+        self,
+        sender=None,
+        app_data=None,
+        user_data=None,
+        *,
+        tool_id: str | None = None,
+        left_time: float | None = None,
+        bottom: float | None = None,
+        right_time: float | None = None,
+        top: float | None = None,
+        geometry: RangeBoxGeometry | None = None,
+        y_axis: dcg.Axis | None = None,
+        on_geometry_changing=None,
+        on_geometry_committed=None,
+        anchor_tooltips_enabled: bool | None = None,
+        hit_size: float = 18.0,
+        min_source_width: float = 1.0,
+        min_source_height: float = 0.01,
+    ) -> RangeBoxTool:
+        candle_plot = self._require_candles_loaded()
+        if geometry is not None and any(value is not None for value in (left_time, bottom, right_time, top)):
+            raise ValueError("Specify either geometry or explicit box coordinates, not both")
+        if geometry is None:
+            explicit_values = (left_time, bottom, right_time, top)
+            if all(value is None for value in explicit_values):
+                geometry = self._default_box_geometry()
+            elif any(value is None for value in explicit_values):
+                raise ValueError("Explicit box creation requires left_time, bottom, right_time, and top")
+            else:
+                geometry = RangeBoxGeometry(
+                    left_time=float(left_time),
+                    bottom=float(bottom),
+                    right_time=float(right_time),
+                    top=float(top),
+                )
+
+        resolved_tool_id = self._next_tool_id("range-box") if tool_id is None else tool_id
+        resolved_y_axis = candle_plot.y_axis if y_axis is None else y_axis
+        resolved_anchor_tooltips = self.anchor_tooltips_enabled if anchor_tooltips_enabled is None else anchor_tooltips_enabled
+
+        box = RangeBoxTool(
+            self,
+            tool_id=resolved_tool_id,
+            geometry=geometry,
+            y_axis=resolved_y_axis,
+            on_geometry_changing=on_geometry_changing,
+            on_geometry_committed=on_geometry_committed,
+            anchor_tooltips_enabled=resolved_anchor_tooltips,
+            hit_size=hit_size,
+            min_source_width=min_source_width,
+            min_source_height=min_source_height,
+        )
+        try:
+            self.register_tool(box)
+        except Exception:
+            box.dispose()
+            raise
+        return box
+
+    def remove_all_boxes(self) -> None:
+        remaining_tools: list[InteractiveTool] = []
+        remaining_ids: set[str] = set()
+        for tool in self._tools:
+            if isinstance(tool, RangeBoxTool):
+                tool.dispose()
+                continue
+            remaining_tools.append(tool)
+            remaining_ids.add(tool.tool_id)
+        self._tools = remaining_tools
+        self._tool_ids = remaining_ids
+
+    def get_box_snapshots(self) -> tuple[RangeBoxDiagnosticSnapshot, ...]:
+        return tuple(box.diagnostic_snapshot() for box in self.boxes)
+
+    @staticmethod
+    def _format_box_snapshot(snapshot: RangeBoxDiagnosticSnapshot) -> str:
+        source = snapshot.source_geometry
+        plot = snapshot.plot_geometry
+        return (
+            f"{snapshot.tool_id} ({snapshot.tool_kind})\n"
+            f"  source: left={source.left_time:.3f} right={source.right_time:.3f} bottom={source.bottom:.4f} top={source.top:.4f}\n"
+            f"  plot:   left={plot.left_time:.3f} right={plot.right_time:.3f} bottom={plot.bottom:.4f} top={plot.top:.4f}"
+        )
+
+    def print_boxes(self) -> str:
+        snapshots = self.get_box_snapshots()
+        if not snapshots:
+            text = "No range boxes."
+            print(text)
+            self._set_status(text)
+            return text
+        text = "\n".join(self._format_box_snapshot(snapshot) for snapshot in snapshots)
+        print(text)
+        self._set_status(text)
+        return text
+
     def unregister_time_series(self, series_id: str) -> None:
         if series_id not in self._time_series:
             raise ValueError(f"Unknown time series ID: {series_id!r}")
@@ -419,6 +622,7 @@ class DearCyFi(dcg.Plot):
         candle_registration = self._time_series.get("candles")
         if candle_registration is not None:
             self.dates = np.asarray(candle_registration.series.source_dates, dtype=float).copy()
+        self._refresh_registered_tools()
 
     @staticmethod
     def _format_spec_to_dict(spec) -> dict[str, object]:
@@ -722,6 +926,7 @@ class DearCyFi(dcg.Plot):
         if self._collapse_source_id is None:
             self._collapse_source_id = "candles"
         self._gap_manager.reset(self.dates)
+        self._refresh_registered_tools()
 
         self._apply_custom_x_labels(
             [str(i) for i in self.index],
@@ -779,6 +984,7 @@ class DearCyFi(dcg.Plot):
         try:
             for series_id, dates in projections.items():
                 self._time_series[series_id].series.set_plot_dates(dates)
+            self._refresh_registered_tools()
         except Exception:
             self.restore_time_chart()
             raise

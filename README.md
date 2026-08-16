@@ -122,3 +122,41 @@ inside a removed interval can use `in_gap="next"` to snap to the first source
 timestamp after the gap or `in_gap="previous"` to snap to the last timestamp
 before it. Use `restore_time_chart()` to restore all registrations. Removing an
 active source also restores the remaining series and clears the selection.
+
+## Interactive Range Boxes
+
+`DearCyFi` now exposes a chart-managed range-box tool whose X anchors stay in
+canonical source time even when the visible chart is collapsed:
+
+```python
+from dearcyfi import RangeBoxGeometry
+
+chart.set_data(...)
+
+box = chart.add_box(
+	geometry=RangeBoxGeometry(
+		left_time=source_left_ts,
+		bottom=price_low,
+		right_time=source_right_ts,
+		top=price_high,
+	),
+	on_geometry_committed=lambda tool, geometry: print(tool.tool_id, geometry),
+)
+```
+
+Omitting geometry uses a default box derived from the current chart view or
+loaded candle extents. `chart.tools` returns all managed interactive tools, and
+`chart.boxes` returns just the active range boxes in chart order.
+
+Each `RangeBoxTool` exposes immutable `source_geometry`, projected
+`plot_geometry`, semantic `anchor_roles`, and canonical anchor lookup through
+`get_anchor(role)`. Programmatic `set_geometry(...)` uses the same validation
+and committed-callback path as interactive updates.
+
+Hovering a corner anchor shows a simple tooltip with the tool ID, anchor role,
+source-formatted date/time, and current price. These tooltips stay tied to real
+timestamps after collapse and update live while an anchor moves.
+
+This initial tool foundation intentionally stops at hover tooltips and range
+selection. Fibonacci levels, persistent labels, and candle-derived aggregation
+logic remain deferred follow-up work.
