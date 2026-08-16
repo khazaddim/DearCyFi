@@ -35,5 +35,5 @@
 - [x] 4.3 Add collapse/restore/reload tests asserting canonical source anchors and rendered plot anchors remain coherent.
 - [x] 4.4 Add anchor-tooltip tests for canonical dates after collapse, current prices after movement, duplicate `GotHover`, target switching, stale `LostHover`, correct parent ownership, rebuild cleanup, and tool disposal.
 - [x] 4.5 Run the focused tests and the existing collapse, candle, econometric, and axis-assignment regression tests.
-- [ ] 4.6 Run the demo and manually verify add, independent interaction, anchor coordinate tooltips before and after collapse, source/rendered coordinate printing, restore, and remove-all behavior.
+- [x] 4.6 Run the demo and manually verify add, independent interaction, anchor coordinate tooltips before and after collapse, source/rendered coordinate printing, restore, and remove-all behavior.
 - [x] 4.7 Document the range-box API, source-time geometry semantics, callbacks, simple hover tooltips, and deferred Fibonacci/persistent-label/aggregation goals.
