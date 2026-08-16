@@ -167,6 +167,15 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._volume_bar_series = dcg.PlotColorBars(context, **self._volume_kwargs)
 
         self._tooltip = tooltip
+        # Tooltip lifecycle state machine:
+        # - no active tooltip: (_active_tooltip is None, _active_tooltip_target is None)
+        # - active tooltip: one Tooltip instance bound to one hovered candle button
+        # On GotHover we reuse if the same target is already active, otherwise
+        # replace the previous tooltip. On LostHover we clear the active tooltip.
+        # This avoids occasional duplicate OHLC blocks if hover callbacks fire
+        # more than once for the same item.
+        self._active_tooltip = None
+        self._active_tooltip_target = None
         self._update_volume_series()
 
         self._time_formatter_input = time_formatter
@@ -295,6 +304,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         count = self._dates.shape[0]
         width_percent = self._weight
         half_width = ((self._dates[1] - self._dates[0]) * width_percent) if count > 1 else width_percent
+        self._clear_active_tooltip()
         self.children = []
         buttons = []
         with self:
@@ -339,21 +349,55 @@ class PlotCandleStick(dcg.DrawInPlot):
                                 text=str(int(count_val)),
                                 color=color
                             )
-        tooltip_handler = dcg.GotHoverHandler(self.context, callback=self._tooltip_handler)
-        # Here add your handlers to the buttons to react to clicks, etc
         for button in buttons:
-            button.handlers = [tooltip_handler]
+            button.handlers = [
+                dcg.GotHoverHandler(self.context, callback=self._tooltip_handler),
+                dcg.LostHoverHandler(self.context, callback=self._tooltip_lost_handler),
+            ]
+
+    def _clear_active_tooltip(self) -> None:
+        """Delete and reset the currently active managed tooltip, if any.
+
+        This keeps tooltip ownership explicit and ensures render() or hover
+        transitions cannot leave stale tooltip instances behind.
+        """
+        if self._active_tooltip is not None:
+            try:
+                self._active_tooltip.delete_item()
+            except Exception:
+                pass
+        self._active_tooltip = None
+        self._active_tooltip_target = None
 
     def _tooltip_handler(self, sender, target):
+        """Create or reuse the candle tooltip for a hovered invisible button.
+
+        The handler enforces a single-tooltip policy:
+        - If the hovered target already owns the active tooltip, do nothing.
+        - Otherwise, clear any previous tooltip and create a new one for target.
+
+        This prevents duplicate OHLC rows during rare duplicate GotHover bursts.
+        """
+        if not self._tooltip:
+            return
+        if target is self._active_tooltip_target and self._active_tooltip is not None:
+            return
         data = target.user_data
-        if self._tooltip:
-            with dcg.utils.TemporaryTooltip(self.context, target=target,
-                                            parent=target.parent):
-                dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
-                dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
-                dcg.Text(self.context, value=f"Close: {data[2]:.2f}")
-                dcg.Text(self.context, value=f"Low: {data[3]:.2f}")
-                dcg.Text(self.context, value=f"High: {data[4]:.2f}")
+        self._clear_active_tooltip()
+        with dcg.Tooltip(self.context, target=target,
+                         parent=self.parent.parent) as tooltip:
+            dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
+            dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
+            dcg.Text(self.context, value=f"Close: {data[2]:.2f}")
+            dcg.Text(self.context, value=f"Low: {data[3]:.2f}")
+            dcg.Text(self.context, value=f"High: {data[4]:.2f}")
+        self._active_tooltip = tooltip
+        self._active_tooltip_target = target
+
+    def _tooltip_lost_handler(self, sender, target):
+        """Clear the active tooltip when hover leaves its owning target."""
+        if target is self._active_tooltip_target:
+            self._clear_active_tooltip()
 
 
     def update_all(self, dates, opens, closes, lows, highs, volumes, time_counts=None, source_dates=None):
