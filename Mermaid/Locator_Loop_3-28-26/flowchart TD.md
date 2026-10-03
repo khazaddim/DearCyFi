@@ -44,7 +44,7 @@ flowchart TD
         LT12 -- No --> LT18["Advance to next major"]
         LT17 --> LT18
         LT18 --> LT19{"More major intervals?"}
-        LT19 -- Yes --> LT7
+        LT19 -- Yes --> LT20["Repeat for next major interval"]
 
         LT2 -- Yes --> LTY1["Year scale via nice_num"]
         LTY1 --> LTY2["Loop years emit level-0 ticks"]
