@@ -1,7 +1,8 @@
 ---
+name: openspec-proposal
 description: Scaffold a new OpenSpec change and validate strictly.
+disable-model-invocation: true
 ---
-
 $ARGUMENTS
 <!-- OPENSPEC:START -->
 **Guardrails**

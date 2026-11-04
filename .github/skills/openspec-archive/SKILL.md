@@ -1,7 +1,8 @@
 ---
+name: openspec-archive
 description: Archive a deployed OpenSpec change and update specs.
+disable-model-invocation: true
 ---
-
 $ARGUMENTS
 <!-- OPENSPEC:START -->
 **Guardrails**

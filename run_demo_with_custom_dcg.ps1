@@ -1,6 +1,9 @@
 # Activate the custom DearCyGui environment and run the demo
 # This environment uses your custom DearCyGui branch: integrate/replay-upstream-2026-06-20
 
+# To run:
+# .\run_demo_with_custom_dcg.ps1
+
 Write-Host "Activating custom DearCyGui environment (.venv-dcg)..." -ForegroundColor Cyan
 & .\.venv-dcg\Scripts\Activate.ps1
 

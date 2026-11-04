@@ -1,7 +1,8 @@
 ---
+name: openspec-apply
 description: Implement an approved OpenSpec change and keep tasks in sync.
+disable-model-invocation: true
 ---
-
 $ARGUMENTS
 <!-- OPENSPEC:START -->
 **Guardrails**
