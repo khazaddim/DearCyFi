@@ -75,12 +75,30 @@ with chart:
 	)
 ```
 
-The series uses native `PlotLine` and optional `PlotScatter` elements. NaN
-values break the line by default. Basic observation tooltips show the label,
-original source date, and value. `source_dates` remain unchanged when
-`set_plot_dates(...)` applies transformed chart coordinates;
-`restore_source_dates()` returns the line, markers, and tooltip hit regions to
-real time.
+The series is one legend-enabled `dcg.DrawInPlot` containing drawing
+primitives: `DrawPolyline` runs for the line, optional `DrawCircle` markers,
+and optional `DrawInvisibleButton` tooltip hit regions. Hiding the series from
+the legend hides the line, markers, and tooltips together, and a hidden series
+does not affect axis fitting. NaN values or timestamps break the line; they are
+never interpolated. Basic observation tooltips show the label, original source
+date, and value. `source_dates` remain unchanged when `set_plot_dates(...)`
+applies transformed chart coordinates; `restore_source_dates()` returns the
+line, markers, and tooltip hit regions to real time.
+
+Styling options (sizes are screen pixels and stay constant while zooming):
+
+| Option | Default |
+| --- | --- |
+| `line_color` | `(255, 196, 0, 255)` |
+| `line_thickness` | `1.5` |
+| `marker_color` | same as `line_color` |
+| `marker_radius` | `3.0` |
+
+Migration: the former native `line`/`markers` attributes and the
+`line_kwargs`/`marker_kwargs` options were removed. Passing either kwargs option
+raises a `ValueError`; use the styling options above. Other `DrawInPlot`
+options such as `show` or `ignore_fit` are accepted; `axes` is rejected in
+favour of `y_axis`.
 
 Candles and econometric series accept `Y1`, `Y2`, or `Y3` while retaining
 `X1` as the shared time axis. Candles default to `Y1` through
