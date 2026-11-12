@@ -102,14 +102,14 @@ runs = np.split(idx, np.flatnonzero(np.diff(idx) != 1) + 1) if idx.size else []
 
 When the legend hides a `DrawInPlot`, its children are **skipped without updating state**: a button can keep a stale `hovered=True`, so a plain `Tooltip(target=button)` may stay open for a hidden series.
 
-Use the drawn-hover condition pattern from `econometric_series.py`:
+Use the shared `_DrawnHoverCondition` from `src/dearcyfi/_series_tooltips.py`, as used by both `PlotEconometricSeries` and `PlotCandleStick`:
 
 1. Attach shared `GotHoverHandler` → `_tooltip_handler` and `LostHoverHandler` → `_tooltip_lost_handler` to all buttons.
 2. On hover, clear any active tooltip, create a `_DrawnHoverCondition` (`dcg.CustomHandler`), append it to that button's handlers, and pass it as the tooltip's `condition_from_handler`. Its `run()` marks "drawn this frame"; `check_status()` consumes the mark and requires `item.state.hovered`. If the button is not drawn, the tooltip closes immediately.
 3. Parent the tooltip to `self.parent.parent` (outside the series). Widget children of a legend-enabled `DrawInPlot` are rendered inside its **legend popup**.
 4. `_clear_active_tooltip()` deletes the tooltip and removes the condition handler from its target; call it from `render()` and on lost hover. Keep at most one active tooltip per series.
 
-Reuse this (or extract it into a shared helper) rather than re-implementing it. Candles currently use an older pattern without the drawn check.
+Reuse this shared condition rather than re-implementing it. Both candle and econometric tooltips use it; candle volume remains a separate plot item.
 
 ## Styling API
 

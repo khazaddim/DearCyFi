@@ -4,7 +4,7 @@ import pytest
 import dearcygui as dcg
 
 from dearcyfi import PlotEconometricSeries
-from dearcyfi.econometric_series import _DrawnHoverCondition
+from dearcyfi._series_tooltips import _DrawnHoverCondition
 
 
 @pytest.fixture

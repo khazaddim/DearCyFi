@@ -5,6 +5,8 @@ from collections.abc import Callable, Sized
 import dearcygui as dcg
 import numpy as np
 
+from ._series_tooltips import _DrawnHoverCondition
+
 _SUPPORTED_Y_AXES = (dcg.Axis.Y1, dcg.Axis.Y2, dcg.Axis.Y3)
 _LEGACY_OPTIONS = ("line_kwargs", "marker_kwargs")
 
@@ -25,30 +27,6 @@ def _validate_screen_size(name: str, value: float) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be a positive finite number of screen pixels")
     return value
-
-
-class _DrawnHoverCondition(dcg.CustomHandler):
-    """Tooltip condition that is true only while its target is drawn and hovered.
-
-    Children of a legend-hidden ``DrawInPlot`` are skipped without updating
-    their hover state, so a plain hover condition can keep a tooltip open for
-    a hidden series. Bound to the target, ``run`` records each frame the target
-    is drawn; the tooltip consumes that record in ``check_status``.
-    """
-
-    def __init__(self, context, **kwargs) -> None:
-        super().__init__(context, **kwargs)
-        self._drawn = False
-
-    def check_can_bind(self, item) -> bool:
-        return isinstance(item, dcg.DrawInvisibleButton)
-
-    def check_status(self, item) -> bool:
-        drawn, self._drawn = self._drawn, False
-        return drawn and item.state.hovered
-
-    def run(self, item) -> None:
-        self._drawn = True
 
 
 class PlotEconometricSeries(dcg.DrawInPlot):

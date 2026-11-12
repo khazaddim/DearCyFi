@@ -4,6 +4,8 @@ import dearcygui as dcg
 import numpy as np
 from collections.abc import Sized
 
+from ._series_tooltips import _DrawnHoverCondition
+
 # Auto tooltip formats are checked from coarsest to finest cadence. The seconds
 # values are canonical candle intervals used as tolerant thresholds, not exact
 # matches, so irregular market gaps do not usually change the selected format.
@@ -176,6 +178,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         # more than once for the same item.
         self._active_tooltip = None
         self._active_tooltip_target = None
+        self._active_tooltip_condition = None
         self._update_volume_series()
 
         self._time_formatter_input = time_formatter
@@ -362,12 +365,14 @@ class PlotCandleStick(dcg.DrawInPlot):
         transitions cannot leave stale tooltip instances behind.
         """
         if self._active_tooltip is not None:
-            try:
-                self._active_tooltip.delete_item()
-            except Exception:
-                pass
+            self._active_tooltip.delete_item()
+        target = self._active_tooltip_target
+        condition = self._active_tooltip_condition
+        if target is not None and condition is not None:
+            target.handlers = [handler for handler in target.handlers if handler is not condition]
         self._active_tooltip = None
         self._active_tooltip_target = None
+        self._active_tooltip_condition = None
 
     def _tooltip_handler(self, sender, target):
         """Create or reuse the candle tooltip for a hovered invisible button.
@@ -384,7 +389,10 @@ class PlotCandleStick(dcg.DrawInPlot):
             return
         data = target.user_data
         self._clear_active_tooltip()
+        condition = _DrawnHoverCondition(self.context)
+        target.handlers = list(target.handlers) + [condition]
         with dcg.Tooltip(self.context, target=target,
+                         condition_from_handler=condition,
                          parent=self.parent.parent) as tooltip:
             dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
             dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
@@ -393,6 +401,7 @@ class PlotCandleStick(dcg.DrawInPlot):
             dcg.Text(self.context, value=f"High: {data[4]:.2f}")
         self._active_tooltip = tooltip
         self._active_tooltip_target = target
+        self._active_tooltip_condition = condition
 
     def _tooltip_lost_handler(self, sender, target):
         """Clear the active tooltip when hover leaves its owning target."""
