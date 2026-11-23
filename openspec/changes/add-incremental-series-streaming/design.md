@@ -119,6 +119,14 @@ def apply_event(chart, event):
 
 The host awaits its provider outside this callback, enqueues the callback, and reports validation errors explicitly. Provider candle messages should use candle-start timestamps; hosts feeding intra-interval ticks must handle aggregation themselves. Initial bulk collection and its timeout remain future adapter work.
 
+### Synthetic demo stream
+
+Extend the demo's existing fake candle controls rather than adding a real-provider widget. The host owns the stream lifecycle and chart mutations; the controls request start, stop, and a gap in the next appended candle. Use a deterministic seed and a configurable update period so a user can observe several valid OHLCV revisions of the current candle followed by a new candle without waiting for the displayed candle interval. Timestamps remain interval starts in Unix seconds, with the interval derived from the loaded series' streaming cadence.
+
+Start from the already bulk-loaded synthetic candles, require enough history to establish cadence, and apply events through the chart's public candle operations at a serialized host update boundary. Keep the original-time comparison plot synchronized with the same observations at real timestamps. The existing econometric follower remains available to observe shared collapse behavior; no synthetic econometric stream is required.
+
+Stop and await or otherwise finish the producer before reloading candles, changing the selected toy symbol, or shutting down. Starting twice must not create concurrent streams; restarting uses the currently loaded data, not stale generator state. Display running, stopped, and error status, and stop on a mutation failure rather than silently dropping an event. Do not automatically fit or follow the stream. The synthetic stream is a visual and functional demonstration, not a throughput or large-series benchmark.
+
 ## Risks / Trade-offs
 
 - The historical median may not represent a calendar-based or mixed-frequency feed. This API deliberately enforces the loaded elapsed-time cadence; shorter DST/calendar arrivals can fail and require a separate cadence-policy proposal.

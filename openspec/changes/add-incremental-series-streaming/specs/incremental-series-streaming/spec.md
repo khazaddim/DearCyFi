@@ -139,3 +139,28 @@ Documentation SHALL show a provider-neutral check/update-or-append consumer on a
 - **AND** provider network work remains outside chart mutation
 - **AND** validation errors are explicitly reported rather than silently dropping events
 - **AND** initial collection timeouts, broker SDK setup, and tick aggregation remain outside the core streaming contract
+
+### Requirement: Synthetic Streaming Demo
+The demo SHALL provide controls for starting and stopping a deterministic synthetic candle stream over already loaded candle data, with a configurable update period and an option to introduce a gap in the next appended candle. The demo host SHALL own the stream lifecycle and serialize chart mutations, without adding a provider SDK or a background-task framework to the core.
+
+#### Scenario: Visually inspect revisions and new candles
+- **GIVEN** synthetic candle history with an established cadence is loaded
+- **WHEN** the user starts streaming
+- **THEN** the stream repeatedly emits valid OHLCV revisions of the latest candle and appends subsequent candles using real interval-start timestamps
+- **AND** the DearCyFi chart uses its public streaming operations while the original-time comparison plot reflects the same observations at real timestamps
+- **AND** updates do not automatically fit or scroll either plot
+
+#### Scenario: Inspect a streamed gap
+- **WHEN** the user requests a gap for the next new candle while streaming
+- **THEN** the next appended timestamp is more than one established candle interval after the latest timestamp
+- **AND** the user can inspect the resulting candle and existing follower behavior in collapsed and uncollapsed modes
+
+#### Scenario: Stop, reload, or shut down
+- **WHEN** the user stops streaming, reloads candle data, selects a different toy symbol, or closes the demo
+- **THEN** the previous producer stops before it can apply further events to the replacement data or closed demo
+- **AND** starting again uses the current loaded series without creating multiple concurrent producers
+- **AND** the demo reports running, stopped, and failure status
+
+#### Scenario: Reject an unavailable or failed stream
+- **WHEN** streaming is started without enough loaded history to establish cadence, or a generated update fails
+- **THEN** the demo reports an actionable error and does not continue silently applying events

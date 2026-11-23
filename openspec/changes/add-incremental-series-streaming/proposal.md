@@ -16,16 +16,18 @@ Consumers need to distinguish a forming candle from a new candle using real time
 - Extend the selected source's gap map at its tail, preserving historical gap records and coordinates, and synchronize affected follower projections, tools, and time-axis presentation.
 - Preserve collapsed/uncollapsed state and existing series presentation during updates.
 - Document a provider-neutral serialized check/update-or-append loop suitable for use behind an asynchronous provider adapter.
+- Extend the demo's synthetic candle controls with a start/stop stream that revises the latest candle, appends new candles, and can introduce a gap for visual testing.
 
 ## Scope And Non-Goals
 - No broker SDK dependency, authentication, subscription management, or Tastytrade-specific payloads in the core package.
 - No initial historical stream collection, timeout policy, or new bulk-loading API; consumers begin with existing bulk-loaded data.
 - No arbitrary historical insertion, timestamp correction, automatic upsert, resampling, automatic OHLC aggregation from ticks, or automatic series creation.
 - No automatic scrolling, axis fitting, background task framework, or guaranteed constant-time drawing update.
+- No real-provider integration, data-lake merging, persistent cache, or large-history benchmark; the demo stream uses synthetic data only.
 
 ## Impact
 - Affected capabilities: new `incremental-series-streaming`; additive extension to `time-collapse-coordination` introduced by `add-econometric-series-collapse-source`.
-- Affected code: `src/dearcyfi/core.py`, `src/dearcyfi/candle_utils/gap_utils.py`, `src/dearcyfi/DCG_Candle_Utils.py`, `src/dearcyfi/econometric_series.py`, related tests, and `README.md`.
+- Affected code: `src/dearcyfi/core.py`, `src/dearcyfi/candle_utils/gap_utils.py`, `src/dearcyfi/DCG_Candle_Utils.py`, `src/dearcyfi/econometric_series.py`, demo candle controls and host, related tests, `README.md`, and the demo README.
 - Related work: build on the completed `add-econometric-series-collapse-source` change; coordinate econometric renderer edits with the active `refactor-econometric-series-drawing` change without changing its rendering contract.
 - Existing `set_data(...)`, full-series replacement, registration, and collapse/restore APIs remain available with their current lifecycle behavior.
 
