@@ -284,7 +284,7 @@ class PlotCandleStick(dcg.DrawInPlot):
             for open_, close in zip(opens, closes)
         ]
 
-    def _update_volume_series(self) -> None:
+    def _update_volume_series(self, *, update_weight: bool = True) -> None:
         if self._volume_bar_series is None:
             return
         dates = np.asarray(self._dates, dtype=float)
@@ -297,7 +297,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._volume_bar_series.X = []
         self._volume_bar_series.Y = []
         self._volume_bar_series.colors = colors
-        if self._volume_uses_default_weight:
+        if self._volume_uses_default_weight and update_weight:
             self._volume_bar_series.weight = self._volume_bar_weight()
         self._volume_bar_series.X = dates
         self._volume_bar_series.Y = normalized_volumes
@@ -409,7 +409,20 @@ class PlotCandleStick(dcg.DrawInPlot):
             self._clear_active_tooltip()
 
 
-    def update_all(self, dates, opens, closes, lows, highs, volumes, time_counts=None, source_dates=None):
+    def update_all(
+        self,
+        dates,
+        opens,
+        closes,
+        lows,
+        highs,
+        volumes,
+        time_counts=None,
+        source_dates=None,
+        *,
+        refresh_formatter: bool = True,
+        refresh_volume_weight: bool = True,
+    ):
         """Set all arrays at once and re-render once.
 
         Raises:
@@ -431,18 +444,32 @@ class PlotCandleStick(dcg.DrawInPlot):
         self._lows = lows
         self._highs = highs
         self._volumes = volumes
-        self._refresh_time_formatter()
+        if refresh_formatter:
+            self._refresh_time_formatter()
         if time_counts is not None:
             self._time_counts = time_counts
             self._validate_time_counts()
 
-        self._update_volume_series()
+        self._update_volume_series(update_weight=refresh_volume_weight)
 
         # rebuild the drawing primitives once
         self.render()
 
     # helper to apply partial updates and validate once
-    def update(self, dates=None, opens=None, closes=None, lows=None, highs=None, volumes=None, time_counts=None, source_dates=None):
+    def update(
+        self,
+        dates=None,
+        opens=None,
+        closes=None,
+        lows=None,
+        highs=None,
+        volumes=None,
+        time_counts=None,
+        source_dates=None,
+        *,
+        refresh_formatter: bool = True,
+        refresh_volume_weight: bool = True,
+    ):
         """Update one or more series and re-render once. Validates lengths."""
         if dates is not None:
             self._dates = dates
@@ -461,11 +488,12 @@ class PlotCandleStick(dcg.DrawInPlot):
         if time_counts is not None:
             self._time_counts = time_counts
 
-        self._refresh_time_formatter()
+        if refresh_formatter:
+            self._refresh_time_formatter()
 
         self._validate_lengths()
         self._validate_time_counts()
-        self._update_volume_series()
+        self._update_volume_series(update_weight=refresh_volume_weight)
         
         self.render()
 

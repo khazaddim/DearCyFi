@@ -141,6 +141,82 @@ timestamp after the gap or `in_gap="previous"` to snap to the last timestamp
 before it. Use `restore_time_chart()` to restore all registrations. Removing an
 active source also restores the remaining series and clears the selection.
 
+## Incremental Streaming
+
+Streaming is synchronous and provider-neutral. Bulk-load a series first; each
+mutable registration infers its median positive interval from at least two
+finite, strictly increasing source timestamps on its first check or mutation.
+That cadence remains fixed until `set_data(...)` replaces candle history or
+the mutable registration is replaced. Timestamps are Unix seconds as floating
+point values; candle timestamps identify interval starts.
+
+The chart exposes generic operations for candle and scalar econometric
+registrations:
+
+```python
+matches, latest_start = chart.check_last_sample("candles", event.timestamp)
+if matches:
+    chart.update_last_sample("candles", close=event.close, volume=event.volume)
+else:
+    chart.append_sample(
+        "candles",
+        timestamp=event.timestamp,
+        open=event.open,
+        high=event.high,
+        low=event.low,
+        close=event.close,
+        volume=event.volume,
+    )
+```
+
+For scalar series, use the same operations with the `"value"` field. Candle
+convenience methods are `check_last_candle(timestamp)`,
+`append_candle(timestamp=..., open=..., high=..., low=..., close=...,
+volume=0.0)`, and `update_last_candle(...)`. The check returns
+`(matches_latest_interval, stored_latest_source_timestamp)`; an empty series
+returns `(False, None)`. The latest interval is half-open. Its boundary
+tolerance in seconds is
+`max(min(0.001, interval * 1e-6), 8 * max(ulp(start), ulp(query), ulp(end)))`.
+Precision too coarse to distinguish adjacent intervals raises an error.
+
+Append is not an implicit upsert: arrivals less than one cached interval after
+the latest source timestamp are rejected. Equal-cadence appends preserve the
+real timestamp without removing more time. Longer intervals are accepted as
+gaps; while collapsed, only the excess over the cached cadence is removed for
+an append to the selected collapse source. While uncollapsed, all accepted
+timestamps remain at real coordinates. Latest updates replace only supplied
+values. Candle volume is replacement data, and the complete resulting candle
+must satisfy finite OHLCV, nonnegative volume, and
+`low <= open/close <= high`.
+When no candle index was supplied to `set_data`, appended candles extend the
+default zero-based index. With a custom index, the appended label is its source
+timestamp in seconds rather than a guessed successor for an arbitrary label.
+
+Projection-only registrations remain valid collapse followers but do not
+support streaming mutation. A check miss does not guarantee that append will
+pass interval and payload validation.
+
+Async providers should normalize events and serialize each check/mutation pair
+on the chart-owning thread. There must be no `await` between the check and its
+mutation:
+
+```python
+def apply_event(chart, event):
+    exists, latest_timestamp = chart.check_last_candle(event.timestamp)
+    if exists:
+        chart.update_last_candle(**event.ohlcv)
+    else:
+        chart.append_candle(timestamp=event.timestamp, **event.ohlcv)
+
+# Await provider I/O outside this callback, then enqueue apply_event as one
+# serialized chart update and report its validation errors to the application.
+```
+
+This API does not provide initial bulk collection, broker adapters, historical
+correction, calendar-aware cadence policies, tick aggregation, or rendering
+optimizations. See the [demo streaming walkthrough](examples/DearCyFi_Demo/README.md)
+for a synthetic visual example.
+
 ## Interactive Range Boxes
 
 `DearCyFi` now exposes a chart-managed range-box tool whose X anchors stay in

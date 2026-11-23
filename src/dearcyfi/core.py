@@ -11,6 +11,7 @@ from .PyTimeLocator import locator_time3
 from .DCG_Candle_Utils import PlotCandleStick
 from .candle_utils.gap_utils import GapCollapseManager
 from .range_box_tools import AnchorTooltipCoordinator, InteractiveTool, RangeBoxDiagnosticSnapshot, RangeBoxGeometry, RangeBoxTool
+from .streaming import classify_append_spacing, finite_timestamp, infer_cadence, latest_interval_matches
 
 
 def _generate_sample_bar_data(num_bars, y_min, y_max, x_min, x_max):
@@ -33,6 +34,7 @@ def _horizontal_bar_weight(positions) -> float:
 class TimeSeriesRegistration:
     series: object
     in_gap: str = "next"
+    mutation_adapter: object | None = None
 
 
 class _CandleSeriesAdapter:
@@ -46,8 +48,102 @@ class _CandleSeriesAdapter:
     def set_plot_dates(self, dates: np.ndarray) -> None:
         self.candle.update(dates=np.asarray(dates, dtype=float))
 
+    def set_plot_dates_incremental(self, dates: np.ndarray) -> None:
+        self.candle.update(
+            dates=np.asarray(dates, dtype=float),
+            refresh_formatter=False,
+            refresh_volume_weight=False,
+        )
+
     def restore_source_dates(self) -> None:
         self.set_plot_dates(self.source_dates)
+
+    def capture(self) -> dict[str, object]:
+        return {
+            "dates": np.asarray(self.candle.dates, dtype=float).copy(),
+            "source_dates": self.source_dates,
+            "opens": np.asarray(self.candle.opens, dtype=float).copy(),
+            "highs": np.asarray(self.candle.highs, dtype=float).copy(),
+            "lows": np.asarray(self.candle.lows, dtype=float).copy(),
+            "closes": np.asarray(self.candle.closes, dtype=float).copy(),
+            "volumes": np.asarray(self.candle.volumes, dtype=float).copy(),
+            "time_counts": (
+                []
+                if self.candle.time_counts is None
+                else [
+                    [] if counts is None else list(counts)
+                    for counts in self.candle.time_counts
+                ]
+            ),
+        }
+
+    def prepare_append(self, timestamp: float, values: dict[str, object]) -> dict[str, object]:
+        prepared = self.capture()
+        prepared["source_dates"] = np.append(prepared["source_dates"], timestamp)
+        prepared["dates"] = np.append(prepared["dates"], timestamp)
+        for field, value_name in (
+            ("opens", "open"),
+            ("highs", "high"),
+            ("lows", "low"),
+            ("closes", "close"),
+            ("volumes", "volume"),
+        ):
+            prepared[field] = np.append(prepared[field], float(values[value_name]))
+        if prepared["time_counts"]:
+            prepared["time_counts"].append([])
+        return prepared
+
+    def prepare_update(self, values: dict[str, object]) -> dict[str, object]:
+        prepared = self.capture()
+        for field, value in values.items():
+            array_name = "volumes" if field == "volume" else field + "s"
+            prepared[array_name][-1] = float(value)
+        return prepared
+
+    def publish(self, prepared: dict[str, object]) -> None:
+        self.candle.update_all(
+            dates=prepared["dates"],
+            opens=prepared["opens"],
+            closes=prepared["closes"],
+            lows=prepared["lows"],
+            highs=prepared["highs"],
+            volumes=prepared["volumes"],
+            source_dates=prepared["source_dates"],
+            time_counts=prepared["time_counts"],
+            refresh_formatter=False,
+            refresh_volume_weight=False,
+        )
+
+
+class _EconometricSeriesAdapter:
+    def __init__(self, series) -> None:
+        self.series = series
+
+    def capture(self) -> dict[str, np.ndarray]:
+        return {
+            "dates": self.series.plot_dates,
+            "source_dates": self.series.source_dates,
+            "values": self.series.values,
+        }
+
+    def prepare_append(self, timestamp: float, values: dict[str, object]) -> dict[str, np.ndarray]:
+        prepared = self.capture()
+        prepared["source_dates"] = np.append(prepared["source_dates"], timestamp)
+        prepared["dates"] = np.append(prepared["dates"], timestamp)
+        prepared["values"] = np.append(prepared["values"], float(values["value"]))
+        return prepared
+
+    def prepare_update(self, values: dict[str, object]) -> dict[str, np.ndarray]:
+        prepared = self.capture()
+        prepared["values"][-1] = float(values["value"])
+        return prepared
+
+    def publish(self, prepared: dict[str, np.ndarray]) -> None:
+        self.series.update_all(
+            dates=prepared["dates"],
+            values=prepared["values"],
+            source_dates=prepared["source_dates"],
+        )
 
 
 class DearCyFi(dcg.Plot):
@@ -124,6 +220,9 @@ class DearCyFi(dcg.Plot):
 
         self._gap_manager = GapCollapseManager()
         self._time_series: dict[str, TimeSeriesRegistration] = {}
+        self._plot_dates_by_id: dict[str, np.ndarray] = {}
+        self._time_series_sorted: dict[str, bool] = {}
+        self._stream_cadences: dict[str, float] = {}
         self._collapse_source_id: str | None = None
         self._tools: list[InteractiveTool] = []
         self._tool_ids: set[str] = set()
@@ -161,6 +260,7 @@ class DearCyFi(dcg.Plot):
         self.closes = np.array([])
         self.index = np.array([])
         self.volume = np.array([])
+        self._index_is_default = True
 
         self.candlestick_plot = None
         self.horizontal_bars = None
@@ -408,7 +508,14 @@ class DearCyFi(dcg.Plot):
         *,
         in_gap: str = "next",
         replace: bool = False,
+        mutation_adapter: object | None = None,
     ) -> None:
+        """Register a source-date projection and, optionally, mutation support.
+
+        Mutation adapters implement ``capture()``, ``prepare_append(timestamp,
+        values)``, ``prepare_update(values)``, and ``publish(prepared)``. A
+        registration without that capability remains a valid collapse follower.
+        """
         if not isinstance(series_id, str) or not series_id:
             raise ValueError("series_id must be a non-empty string")
         if in_gap not in {"next", "previous"}:
@@ -421,10 +528,433 @@ class DearCyFi(dcg.Plot):
             raise TypeError("registered series must implement set_plot_dates(dates)")
         if not callable(getattr(series, "restore_source_dates", None)):
             raise TypeError("registered series must implement restore_source_dates()")
+        if mutation_adapter is not None and not all(
+            callable(getattr(mutation_adapter, method, None))
+            for method in ("capture", "prepare_append", "prepare_update", "publish")
+        ):
+            raise TypeError(
+                "mutation_adapter must implement capture, prepare_append, prepare_update, and publish"
+            )
+        if (
+            mutation_adapter is None
+            and hasattr(series, "values")
+            and hasattr(series, "plot_dates")
+            and callable(getattr(series, "update_all", None))
+        ):
+            mutation_adapter = _EconometricSeriesAdapter(series)
 
         if replace and series_id in self._time_series:
             self.restore_time_chart()
-        self._time_series[series_id] = TimeSeriesRegistration(series, in_gap)
+            self._stream_cadences.pop(series_id, None)
+        source_dates = np.asarray(series.source_dates, dtype=float)
+        self._time_series[series_id] = TimeSeriesRegistration(series, in_gap, mutation_adapter)
+        self._plot_dates_by_id[series_id] = source_dates.copy()
+        self._time_series_sorted[series_id] = bool(
+            source_dates.size < 2 or np.all(np.diff(source_dates) >= 0)
+        )
+
+    def _stream_interval(self, series_id: str, *, cache: bool = True) -> float:
+        if series_id in self._stream_cadences:
+            return self._stream_cadences[series_id]
+        registration = self._time_series[series_id]
+        cadence = infer_cadence(registration.series.source_dates)
+        if cache:
+            self._stream_cadences[series_id] = cadence
+        return cadence
+
+    def check_last_sample(self, series_id: str, timestamp: float) -> tuple[bool, float | None]:
+        if series_id not in self._time_series:
+            raise ValueError(f"Unknown time series ID: {series_id!r}")
+        candidate = finite_timestamp(timestamp)
+        dates = np.asarray(self._time_series[series_id].series.source_dates, dtype=float)
+        if dates.size == 0:
+            return False, None
+        cadence = self._stream_interval(series_id)
+        latest = float(dates[-1])
+        return latest_interval_matches(latest, candidate, cadence), latest
+
+    @staticmethod
+    def _normalize_sample_values(series_id: str, values: dict[str, object], *, append: bool) -> dict[str, float]:
+        if series_id == "candles":
+            allowed = {"open", "high", "low", "close", "volume"}
+            unknown = set(values) - allowed
+            if unknown:
+                raise ValueError(f"Unsupported candle field(s): {', '.join(sorted(unknown))}")
+            if append:
+                missing = {"open", "high", "low", "close"} - set(values)
+                if missing:
+                    raise ValueError(f"Missing candle field(s): {', '.join(sorted(missing))}")
+            if not append and not values:
+                raise ValueError("Latest update requires at least one field")
+            normalized = {}
+            for name, value in values.items():
+                if value is None:
+                    raise ValueError(f"{name} must be a finite number")
+                try:
+                    number = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"{name} must be a finite number") from exc
+                if not np.isfinite(number):
+                    raise ValueError(f"{name} must be a finite number")
+                normalized[name] = number
+            if append and "volume" not in normalized:
+                normalized["volume"] = 0.0
+            return normalized
+        if set(values) != {"value"} or values["value"] is None:
+            raise ValueError("Scalar econometric samples require exactly one numeric 'value' field")
+        try:
+            return {"value": float(values["value"])}
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("value must be numeric") from exc
+
+    @staticmethod
+    def _validate_candle_arrays(prepared: dict[str, object]) -> None:
+        values = [float(prepared[name][-1]) for name in ("opens", "highs", "lows", "closes", "volumes")]
+        open_value, high_value, low_value, close_value, volume_value = values
+        if not all(np.isfinite(value) for value in values):
+            raise ValueError("Candle OHLCV values must be finite")
+        if volume_value < 0:
+            raise ValueError("Candle volume must be non-negative")
+        if not (low_value <= open_value <= high_value and low_value <= close_value <= high_value):
+            raise ValueError("Candle values must satisfy low <= open/close <= high")
+
+    def _publish_stream_mutation(
+        self,
+        series_id: str,
+        adapter,
+        prepared: dict[str, object],
+        *,
+        new_timestamp: float | None,
+        spacing: str | None,
+        cadence: float,
+    ) -> None:
+        registration = self._time_series[series_id]
+        source_id = self._collapse_source_id
+        selected_source_append = new_timestamp is not None and series_id == source_id
+        old_manager = (
+            self._gap_manager.dates_real,
+            self._gap_manager.time_is_collapsed,
+            self._gap_manager.time_map,
+            self._gap_manager.stream_source_id,
+            self._gap_manager.stream_interval,
+        )
+        old_cadences = dict(self._stream_cadences)
+        old_plot_dates = {
+            key: value.copy() for key, value in self._plot_dates_by_id.items()
+        }
+        old_sorted = dict(self._time_series_sorted)
+        old_chart_state = {
+            "dates": self.dates.copy(),
+            "opens": self.opens.copy(),
+            "highs": self.highs.copy(),
+            "lows": self.lows.copy(),
+            "closes": self.closes.copy(),
+            "volume": self.volume.copy(),
+            "index": self.index.copy(),
+        }
+        old_axis_labels = (
+            list(self.X1.labels),
+            list(self.X1.labels_coord),
+            list(self.X1.labels_major),
+            self.X1.keep_default_ticks,
+            self.X1.no_gridlines,
+        )
+        old_adapter_data = adapter.capture()
+        candidate_dates: dict[str, np.ndarray] = {}
+        previous_source_timestamp = None
+        candidate_map = self._gap_manager.time_map
+        map_snapshot = None
+
+        if new_timestamp is not None:
+            current_source_dates = np.asarray(registration.series.source_dates, dtype=float)
+            if current_source_dates.size == 0:
+                raise ValueError("Cannot append to an empty series")
+            current_plot_dates = self._plot_dates_by_id.get(
+                series_id,
+                np.asarray(registration.series.source_dates, dtype=float),
+            )
+            if selected_source_append:
+                previous_source_timestamp = float(current_source_dates[-1])
+                if self._gap_manager.time_is_collapsed:
+                    if self._gap_manager.time_map is None:
+                        raise RuntimeError("Collapsed chart has no time map")
+                    plotted_timestamp = self._gap_manager.time_map.project_tail_append(
+                        timestamp=new_timestamp,
+                        interval=cadence,
+                        spacing=spacing,
+                        query=new_timestamp,
+                        in_gap="next",
+                    )
+                else:
+                    plotted_timestamp = new_timestamp
+                candidate_dates[series_id] = np.append(current_plot_dates, plotted_timestamp)
+                if self._gap_manager.time_is_collapsed and spacing == "gap":
+                    for follower_id, follower in self._time_series.items():
+                        if follower_id == series_id:
+                            continue
+                        source_dates = np.asarray(follower.series.source_dates, dtype=float)
+                        old_dates = old_plot_dates.get(follower_id, source_dates)
+                        if self._time_series_sorted.get(follower_id, False):
+                            suffix_start = int(
+                                np.searchsorted(source_dates, previous_source_timestamp, side="right")
+                            )
+                            affected = slice(suffix_start, None)
+                            affected_sources = source_dates[suffix_start:]
+                        else:
+                            affected = source_dates > previous_source_timestamp
+                            affected_sources = source_dates[affected]
+                        projected = candidate_map.project_tail_append_many(
+                            timestamp=new_timestamp,
+                            interval=cadence,
+                            spacing=spacing,
+                            queries=affected_sources,
+                            in_gap=follower.in_gap,
+                        )
+                        next_dates = old_dates.copy()
+                        next_dates[affected] = projected
+                        candidate_dates[follower_id] = next_dates
+            else:
+                plotted_timestamp = new_timestamp
+                if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
+                    plotted_timestamp = float(self._gap_manager.time_map.project(
+                        new_timestamp,
+                        in_gap=registration.in_gap,
+                    ))
+                candidate_dates[series_id] = np.append(current_plot_dates, plotted_timestamp)
+            prepared["dates"] = candidate_dates[series_id]
+            if series_id == "candles":
+                prepared["source_dates"] = np.append(current_source_dates, new_timestamp)
+        else:
+            candidate_dates[series_id] = np.asarray(prepared["dates"], dtype=float).copy()
+
+        manager_dates = old_manager[0]
+        if selected_source_append and (
+            self._gap_manager.stream_source_id not in (None, series_id)
+            or manager_dates is None
+            or manager_dates.size == 0
+            or float(manager_dates[-1]) != previous_source_timestamp
+        ):
+            manager_dates = np.asarray(registration.series.source_dates, dtype=float).copy()
+
+        rollback_errors: list[Exception] = []
+        try:
+            if selected_source_append:
+                self._gap_manager.dates_real = manager_dates
+                self._gap_manager.stream_source_id = series_id
+                self._gap_manager.stream_interval = cadence
+                map_snapshot = self._gap_manager.append_source_timestamp(
+                    new_timestamp,
+                    source_id=series_id,
+                    interval=cadence,
+                    spacing=spacing,
+                    use_local_time=self._time_locator_use_local_time,
+                )
+            adapter.publish(prepared)
+            for follower_id, projected in candidate_dates.items():
+                if follower_id == series_id:
+                    self._plot_dates_by_id[follower_id] = projected.copy()
+                    continue
+                follower_registration = self._time_series[follower_id]
+                incremental_setter = getattr(
+                    follower_registration.mutation_adapter,
+                    "set_plot_dates_incremental",
+                    None,
+                )
+                if (
+                    selected_source_append
+                    and self._gap_manager.time_is_collapsed
+                    and spacing == "gap"
+                    and callable(incremental_setter)
+                ):
+                    incremental_setter(projected)
+                else:
+                    follower_registration.series.set_plot_dates(projected)
+                self._plot_dates_by_id[follower_id] = projected.copy()
+            if selected_source_append and self._gap_manager.time_is_collapsed and spacing == "gap":
+                self._refresh_registered_tools()
+            if "candles" in candidate_dates:
+                self.dates = candidate_dates["candles"].copy()
+            if series_id == "candles":
+                self.opens = np.asarray(prepared["opens"], dtype=float).copy()
+                self.highs = np.asarray(prepared["highs"], dtype=float).copy()
+                self.lows = np.asarray(prepared["lows"], dtype=float).copy()
+                self.closes = np.asarray(prepared["closes"], dtype=float).copy()
+                self.volume = np.asarray(prepared["volumes"], dtype=float).copy()
+                if new_timestamp is not None:
+                    next_index = len(self.index) if self._index_is_default else new_timestamp
+                    self.index = np.append(self.index, next_index)
+            if "candles" in candidate_dates and len(self.index) == len(self.dates):
+                self._apply_custom_x_labels(
+                    [str(value) for value in self.index],
+                    self.dates,
+                    no_gridlines=[False] * len(self.index),
+                )
+            self.context.viewport.wake(full_refresh=True)
+        except Exception as original_error:
+            if map_snapshot is not None and old_manager[2] is not None:
+                try:
+                    old_manager[2].rollback_source_append(map_snapshot)
+                except Exception as exc:
+                    rollback_errors.append(exc)
+            try:
+                adapter.publish(old_adapter_data)
+            except Exception as exc:
+                rollback_errors.append(exc)
+            for follower_id in candidate_dates:
+                if follower_id == series_id:
+                    continue
+                original_dates = old_plot_dates[follower_id]
+                try:
+                    follower_registration = self._time_series[follower_id]
+                    incremental_setter = getattr(
+                        follower_registration.mutation_adapter,
+                        "set_plot_dates_incremental",
+                        None,
+                    )
+                    if callable(incremental_setter):
+                        incremental_setter(original_dates)
+                    else:
+                        follower_registration.series.set_plot_dates(original_dates)
+                except Exception as exc:
+                    rollback_errors.append(exc)
+            (
+                self._gap_manager.dates_real,
+                self._gap_manager.time_is_collapsed,
+                self._gap_manager.time_map,
+                self._gap_manager.stream_source_id,
+                self._gap_manager.stream_interval,
+            ) = old_manager
+            self._stream_cadences = old_cadences
+            self._plot_dates_by_id = old_plot_dates
+            self._time_series_sorted = old_sorted
+            self.dates = old_chart_state["dates"]
+            self.opens = old_chart_state["opens"]
+            self.highs = old_chart_state["highs"]
+            self.lows = old_chart_state["lows"]
+            self.closes = old_chart_state["closes"]
+            self.volume = old_chart_state["volume"]
+            self.index = old_chart_state["index"]
+            try:
+                (
+                    self.X1.labels,
+                    self.X1.labels_coord,
+                    self.X1.labels_major,
+                    self.X1.keep_default_ticks,
+                    self.X1.no_gridlines,
+                ) = old_axis_labels
+            except Exception as exc:
+                rollback_errors.append(exc)
+            if self._gap_manager.time_is_collapsed:
+                try:
+                    self._refresh_registered_tools()
+                except Exception as exc:
+                    rollback_errors.append(exc)
+            if rollback_errors:
+                raise RuntimeError(
+                    "Streaming mutation failed and one or more rollback steps also failed: "
+                    + "; ".join(str(error) for error in rollback_errors)
+                ) from original_error
+            raise
+
+        self._stream_cadences[series_id] = cadence
+        if new_timestamp is not None:
+            self._time_series_sorted[series_id] = True
+
+    def append_sample(self, series_id: str, *, timestamp: float, **values) -> None:
+        if series_id not in self._time_series:
+            raise ValueError(f"Unknown time series ID: {series_id!r}")
+        registration = self._time_series[series_id]
+        adapter = registration.mutation_adapter
+        if adapter is None:
+            raise TypeError(f"Time series {series_id!r} does not support mutation")
+        candidate = finite_timestamp(timestamp)
+        cadence = self._stream_interval(series_id, cache=False)
+        source_dates = np.asarray(registration.series.source_dates, dtype=float)
+        if source_dates.size == 0:
+            raise ValueError("Cannot append to an empty series")
+        spacing = classify_append_spacing(float(source_dates[-1]), candidate, cadence)
+        if spacing == "short":
+            raise ValueError("Appended timestamp must be at least one cached interval after the latest sample")
+        normalized = self._normalize_sample_values(series_id, values, append=True)
+        prepared = adapter.prepare_append(candidate, normalized)
+        if series_id == "candles":
+            self._validate_candle_arrays(prepared)
+        self._publish_stream_mutation(
+            series_id,
+            adapter,
+            prepared,
+            new_timestamp=candidate,
+            spacing=spacing,
+            cadence=cadence,
+        )
+
+    def update_last_sample(self, series_id: str, **values) -> None:
+        if series_id not in self._time_series:
+            raise ValueError(f"Unknown time series ID: {series_id!r}")
+        registration = self._time_series[series_id]
+        adapter = registration.mutation_adapter
+        if adapter is None:
+            raise TypeError(f"Time series {series_id!r} does not support mutation")
+        cadence = self._stream_interval(series_id, cache=False)
+        if np.asarray(registration.series.source_dates, dtype=float).size == 0:
+            raise ValueError("Cannot update the latest value of an empty series")
+        normalized = self._normalize_sample_values(series_id, values, append=False)
+        prepared = adapter.prepare_update(normalized)
+        if series_id == "candles":
+            self._validate_candle_arrays(prepared)
+        self._publish_stream_mutation(
+            series_id,
+            adapter,
+            prepared,
+            new_timestamp=None,
+            spacing=None,
+            cadence=cadence,
+        )
+
+    def check_last_candle(self, timestamp: float) -> tuple[bool, float | None]:
+        return self.check_last_sample("candles", timestamp)
+
+    def append_candle(
+        self,
+        *,
+        timestamp: float,
+        open: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float = 0.0,
+    ) -> None:
+        self.append_sample(
+            "candles",
+            timestamp=timestamp,
+            open=open,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+        )
+
+    def update_last_candle(
+        self,
+        *,
+        open: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        close: float | None = None,
+        volume: float | None = None,
+    ) -> None:
+        values = {
+            name: value
+            for name, value in (
+                ("open", open),
+                ("high", high),
+                ("low", low),
+                ("close", close),
+                ("volume", volume),
+            )
+            if value is not None
+        }
+        self.update_last_sample("candles", **values)
 
     def register_tool(self, tool: InteractiveTool) -> InteractiveTool:
         if not isinstance(tool, InteractiveTool):
@@ -612,13 +1142,32 @@ class DearCyFi(dcg.Plot):
         if was_source:
             self.restore_time_chart()
         del self._time_series[series_id]
+        self._plot_dates_by_id.pop(series_id, None)
+        self._time_series_sorted.pop(series_id, None)
+        self._stream_cadences.pop(series_id, None)
         if was_source:
             self._collapse_source_id = None
 
     def restore_time_chart(self) -> None:
         for registration in self._time_series.values():
             registration.series.restore_source_dates()
-        self._gap_manager.reset(None)
+        source_dates = None
+        if self._collapse_source_id in self._time_series:
+            source_dates = np.asarray(
+                self._time_series[self._collapse_source_id].series.source_dates,
+                dtype=float,
+            )
+        self._gap_manager.reset(source_dates)
+        if (
+            self._collapse_source_id is not None
+            and self._collapse_source_id in self._stream_cadences
+        ):
+            self._gap_manager.stream_source_id = self._collapse_source_id
+            self._gap_manager.stream_interval = self._stream_cadences[self._collapse_source_id]
+        self._plot_dates_by_id = {
+            series_id: np.asarray(registration.series.source_dates, dtype=float).copy()
+            for series_id, registration in self._time_series.items()
+        }
         candle_registration = self._time_series.get("candles")
         if candle_registration is not None:
             self.dates = np.asarray(candle_registration.series.source_dates, dtype=float).copy()
@@ -875,12 +1424,14 @@ class DearCyFi(dcg.Plot):
     ) -> None:
         if self._gap_manager.time_is_collapsed:
             self.restore_time_chart()
+        self._stream_cadences.clear()
         self.dates = np.asarray(dates)
         self.opens = np.asarray(opens)
         self.highs = np.asarray(highs)
         self.lows = np.asarray(lows)
         self.closes = np.asarray(closes)
         self.index = np.asarray(index) if index is not None else np.arange(self.dates.shape[0])
+        self._index_is_default = index is None
         if volume is None:
             self.volume = np.zeros_like(self.dates, dtype=float)
         else:
@@ -918,10 +1469,12 @@ class DearCyFi(dcg.Plot):
                 volumes=self.volume,
             )
 
+        candle_adapter = _CandleSeriesAdapter(self.candlestick_plot)
         self.register_time_series(
             "candles",
-            _CandleSeriesAdapter(self.candlestick_plot),
+            candle_adapter,
             replace="candles" in self._time_series,
+            mutation_adapter=candle_adapter,
         )
         if self._collapse_source_id is None:
             self._collapse_source_id = "candles"
@@ -965,10 +1518,12 @@ class DearCyFi(dcg.Plot):
             if vectorized
             else self._gap_manager.collapse_dates
         )
+        base_step = self._stream_cadences.get(self._collapse_source_id)
         collapse_method(
             source_dates,
             use_local_time=self._time_locator_use_local_time,
             debug=debug,
+            base_step=base_step,
         )
         if self._gap_manager.time_map is None:
             self._set_status("Could not build a time-collapse map from the selected source.")
@@ -984,6 +1539,7 @@ class DearCyFi(dcg.Plot):
         try:
             for series_id, dates in projections.items():
                 self._time_series[series_id].series.set_plot_dates(dates)
+                self._plot_dates_by_id[series_id] = np.asarray(dates, dtype=float).copy()
             self._refresh_registered_tools()
         except Exception:
             self.restore_time_chart()

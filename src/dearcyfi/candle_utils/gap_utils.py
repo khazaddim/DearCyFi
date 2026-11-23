@@ -6,6 +6,16 @@ import numpy as np
 import pandas as pd
 
 from dearcyfi.PyTimeLocator import locator_time3
+from dearcyfi.streaming import classify_append_spacing
+
+
+def _gap_indices(times: np.ndarray, interval: float) -> np.ndarray:
+    return np.flatnonzero(
+        [
+            classify_append_spacing(float(start), float(stop), interval) == "gap"
+            for start, stop in zip(times[:-1], times[1:])
+        ]
+    )
 
 
 def _median_delta_time(series: pd.Series) -> int | float:
@@ -139,16 +149,30 @@ class GapCollapsedTimeMap:
         self._segments = segments
         self._collapsed_starts = [s.collapsed_start for s in segments]
         self._collapsed_ends = [s.collapsed_end for s in segments]
+        self._real_starts = [s.real_start for s in segments]
 
-        self.day_starts_real = day_starts_real
-        self.month_starts_real = month_starts_real
-        self.year_starts_real = year_starts_real
+        self._day_starts_real = np.asarray(day_starts_real, dtype=float).tolist()
+        self._month_starts_real = np.asarray(month_starts_real, dtype=float).tolist()
+        self._year_starts_real = np.asarray(year_starts_real, dtype=float).tolist()
+
+    @property
+    def day_starts_real(self) -> np.ndarray:
+        return np.asarray(self._day_starts_real, dtype=float)
+
+    @property
+    def month_starts_real(self) -> np.ndarray:
+        return np.asarray(self._month_starts_real, dtype=float)
+
+    @property
+    def year_starts_real(self) -> np.ndarray:
+        return np.asarray(self._year_starts_real, dtype=float)
 
     @staticmethod
     def from_real_series(
         real_times: np.ndarray,
         *,
         use_local_time: bool,
+        base_step: float | None = None,
     ) -> "GapCollapsedTimeMap":
         """Create a GapCollapsedTimeMap from a series of real Unix timestamps.
 
@@ -165,6 +189,7 @@ class GapCollapsedTimeMap:
                        and contain finite values. Values will be sorted automatically.
             use_local_time: If True, interpret timestamps in local timezone when deriving
                            day/month/year boundaries. If False, use UTC.
+            base_step: Optional stable interval in seconds used to classify gaps.
 
         Returns:
             GapCollapsedTimeMap: A mapping object that can convert between real timestamps
@@ -175,8 +200,8 @@ class GapCollapsedTimeMap:
 
         Algorithm:
             1. Filters to finite values and sorts the timestamp array.
-            2. Calculates base_step as the median delta between consecutive timestamps.
-            3. Detects gaps using find_gaps_and_chunks (gaps > base_step).
+            2. Uses the supplied base_step or the median positive delta.
+            3. Detects gaps larger than base_step outside numerical tolerance.
             4. For each gap, removes (gap_duration - base_step) from the timeline,
                preserving one normal interval to avoid zero-spacing.
             5. Creates _TimeSegment objects that track the real→collapsed mapping.
@@ -194,16 +219,15 @@ class GapCollapsedTimeMap:
             raise ValueError("real_times is empty")
         times = np.sort(times)
 
-        # Use the same median-delta heuristic as find_gaps_and_chunks.
         diffs = np.diff(times)
         diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
-        base_step = float(np.median(diffs)) if diffs.size else 1.0
+        if base_step is None:
+            base_step = float(np.median(diffs)) if diffs.size else 1.0
+        base_step = float(base_step)
         if not np.isfinite(base_step) or base_step <= 0:
-            base_step = 1.0
+            raise ValueError("base_step must be a finite positive interval")
 
-        combined = find_gaps_and_chunks(times.astype(int))
-        gaps = [it for it in combined if str(it.get("Type", "")).lower() == "gap"]
-        gaps_sorted = sorted(gaps, key=lambda it: float(it.get("start", 0)))
+        gap_indices = _gap_indices(times, base_step)
 
         # Build segments that mirror the collapse behavior, but remove only
         # (gap_delta - base_step) so we preserve one "normal" interval.
@@ -225,11 +249,10 @@ class GapCollapsedTimeMap:
                 )
             )
 
-        for g in gaps_sorted:
-            g_start = float(g["start"])  # last sample before gap
-            g_stop = float(g["stop"])    # first sample after gap
-            duration = float(g.get("duration", g_stop - g_start))
-            remove = max(0.0, duration - base_step)
+        for gap_index in gap_indices:
+            g_start = float(times[gap_index])
+            g_stop = float(times[gap_index + 1])
+            remove = max(0.0, g_stop - g_start - base_step)
 
             # Segment ends at the last sample before the gap.
             _append_segment(seg_real_start, g_start, cumulative_removed)
@@ -269,6 +292,155 @@ class GapCollapsedTimeMap:
             month_starts_real=np.asarray(month_starts, dtype=float),
             year_starts_real=np.asarray(year_starts, dtype=float),
         )
+
+    def project_tail_append(
+        self,
+        *,
+        timestamp: float,
+        interval: float,
+        spacing: str,
+        query: float,
+        in_gap: str,
+    ) -> float:
+        """Project an affected follower through a not-yet-published map tail."""
+        previous = self._segments[-1]
+        if spacing == "regular":
+            return float(query) - previous.shift
+        if spacing != "gap" or in_gap not in {"next", "previous"}:
+            raise ValueError("spacing must be 'regular' or 'gap'")
+        collapsed_start = previous.collapsed_end + interval
+        if query < timestamp:
+            return collapsed_start if in_gap == "next" else previous.collapsed_end
+        return float(query) - (timestamp - collapsed_start)
+
+    def project_tail_append_many(
+        self,
+        *,
+        timestamp: float,
+        interval: float,
+        spacing: str,
+        queries: np.ndarray,
+        in_gap: str,
+    ) -> np.ndarray:
+        values = np.asarray(queries, dtype=float)
+        previous = self._segments[-1]
+        if spacing == "regular":
+            return values - previous.shift
+        if spacing != "gap" or in_gap not in {"next", "previous"}:
+            raise ValueError("spacing must be 'regular' or 'gap'")
+        collapsed_start = previous.collapsed_end + interval
+        after_gap = values > timestamp
+        projected = np.full(
+            values.shape,
+            collapsed_start if in_gap == "next" else previous.collapsed_end,
+            dtype=float,
+        )
+        projected[values == timestamp] = collapsed_start
+        projected[after_gap] = values[after_gap] - (timestamp - collapsed_start)
+        projected[~np.isfinite(values)] = values[~np.isfinite(values)]
+        return projected
+
+    def append_source_in_place(
+        self,
+        previous_timestamp: float,
+        timestamp: float,
+        *,
+        interval: float,
+        spacing: str,
+        use_local_time: bool,
+    ) -> tuple:
+        """Extend the map tail and return an O(1) rollback snapshot."""
+        timestamp = float(timestamp)
+        previous = self._segments[-1]
+        if timestamp <= previous.real_end:
+            raise ValueError("appended timestamp must be after the current map endpoint")
+        previous_fields = locator_time3.get_time_fields(
+            locator_time3.ImPlotTime.from_double(previous_timestamp),
+            use_local_time,
+        )
+        current_fields = locator_time3.get_time_fields(
+            locator_time3.ImPlotTime.from_double(timestamp),
+            use_local_time,
+        )
+        day_changed = (
+            previous_fields.tm_year,
+            previous_fields.tm_mon,
+            previous_fields.tm_mday,
+        ) != (
+            current_fields.tm_year,
+            current_fields.tm_mon,
+            current_fields.tm_mday,
+        )
+        month_changed = (
+            previous_fields.tm_year,
+            previous_fields.tm_mon,
+        ) != (
+            current_fields.tm_year,
+            current_fields.tm_mon,
+        )
+        year_changed = previous_fields.tm_year != current_fields.tm_year
+        snapshot = (
+            previous,
+            len(self._segments),
+            len(self._collapsed_starts),
+            len(self._collapsed_ends),
+            len(self._real_starts),
+            len(self._day_starts_real),
+            len(self._month_starts_real),
+            len(self._year_starts_real),
+        )
+        if spacing == "regular":
+            self._segments[-1] = _TimeSegment(
+                real_start=previous.real_start,
+                real_end=timestamp,
+                collapsed_start=previous.collapsed_start,
+                collapsed_end=timestamp - previous.shift,
+                shift=previous.shift,
+            )
+            self._collapsed_ends[-1] = timestamp - previous.shift
+        elif spacing == "gap":
+            collapsed_start = previous.collapsed_end + interval
+            segment = _TimeSegment(
+                real_start=timestamp,
+                real_end=timestamp,
+                collapsed_start=collapsed_start,
+                collapsed_end=collapsed_start,
+                shift=timestamp - collapsed_start,
+            )
+            self._segments.append(segment)
+            self._collapsed_starts.append(segment.collapsed_start)
+            self._collapsed_ends.append(segment.collapsed_end)
+            self._real_starts.append(segment.real_start)
+        else:
+            raise ValueError("spacing must be 'regular' or 'gap'")
+        if day_changed and (not self._day_starts_real or self._day_starts_real[-1] != timestamp):
+            self._day_starts_real.append(timestamp)
+        if month_changed and (not self._month_starts_real or self._month_starts_real[-1] != timestamp):
+            self._month_starts_real.append(timestamp)
+        if year_changed and (not self._year_starts_real or self._year_starts_real[-1] != timestamp):
+            self._year_starts_real.append(timestamp)
+        return snapshot
+
+    def rollback_source_append(self, snapshot: tuple) -> None:
+        (
+            previous_segment,
+            segment_count,
+            collapsed_start_count,
+            collapsed_end_count,
+            real_start_count,
+            day_count,
+            month_count,
+            year_count,
+        ) = snapshot
+        del self._segments[segment_count:]
+        del self._collapsed_starts[collapsed_start_count:]
+        del self._collapsed_ends[collapsed_end_count:]
+        del self._real_starts[real_start_count:]
+        self._segments[-1] = previous_segment
+        self._collapsed_ends[-1] = previous_segment.collapsed_end
+        del self._day_starts_real[day_count:]
+        del self._month_starts_real[month_count:]
+        del self._year_starts_real[year_count:]
 
     def expand(self, collapsed_time: float) -> float:
         """Map collapsed-x back to real unix time (seconds)."""
@@ -318,17 +490,16 @@ class GapCollapsedTimeMap:
         if timestamp > last.real_end:
             return timestamp - last.shift
 
-        for index, segment in enumerate(self._segments):
-            if segment.real_start <= timestamp <= segment.real_end:
-                return timestamp - segment.shift
-            if index + 1 >= len(self._segments):
-                break
+        index = max(0, bisect.bisect_right(self._real_starts, timestamp) - 1)
+        segment = self._segments[index]
+        if timestamp <= segment.real_end:
+            return timestamp - segment.shift
+        if index + 1 < len(self._segments):
             next_segment = self._segments[index + 1]
-            if segment.real_end < timestamp < next_segment.real_start:
+            if timestamp < next_segment.real_start:
                 if in_gap == "next":
                     return next_segment.collapsed_start
                 return segment.collapsed_end
-
         raise ValueError(f"timestamp {timestamp!r} could not be projected")
 
     def project_many(self, real_times: np.ndarray, *, in_gap: str = "next") -> np.ndarray:
@@ -370,6 +541,8 @@ class GapCollapseManager:
         self.time_is_collapsed = False
         self.time_map: GapCollapsedTimeMap | None = None
         self.dates_real: np.ndarray | None = None
+        self.stream_source_id: str | None = None
+        self.stream_interval: float | None = None
 
     @staticmethod
     def _compute_base_step(times: np.ndarray) -> float:
@@ -384,6 +557,41 @@ class GapCollapseManager:
         self.dates_real = None if dates is None else np.array(dates, copy=True, dtype=float)
         self.time_is_collapsed = False
         self.time_map = None
+        self.stream_source_id = None
+        self.stream_interval = None
+
+    def append_source_timestamp(
+        self,
+        timestamp: float,
+        *,
+        source_id: str,
+        interval: float,
+        spacing: str,
+        use_local_time: bool,
+    ) -> tuple | None:
+        if self.dates_real is None or self.dates_real.size == 0:
+            raise ValueError("Cannot stream an empty collapse source")
+        previous = float(self.dates_real[-1])
+        if self.stream_source_id not in (None, source_id):
+            raise ValueError("Streaming cadence belongs to a different collapse source")
+        if self.stream_interval is not None and self.stream_interval != interval:
+            raise ValueError("Streaming cadence changed without replacing the source data")
+        self.stream_source_id = source_id
+        self.stream_interval = interval
+        next_map_snapshot = None
+        next_dates = np.append(self.dates_real, float(timestamp))
+        if self.time_is_collapsed:
+            if self.time_map is None:
+                raise RuntimeError("Collapsed chart has no time map")
+            next_map_snapshot = self.time_map.append_source_in_place(
+                previous,
+                timestamp,
+                interval=interval,
+                spacing=spacing,
+                use_local_time=use_local_time,
+            )
+        self.dates_real = next_dates
+        return next_map_snapshot
 
     def find_gaps_and_chunks(self, dates: np.ndarray) -> list[dict]:
         return find_gaps_and_chunks(dates)
@@ -453,41 +661,31 @@ class GapCollapseManager:
         str_out = "Gaps and Chunks found:\n" + "\n".join(lines)
         return GapReport(gaps_n_chunks, str_out)
 
-    def collapse_dates(self, dates: np.ndarray, *, use_local_time: bool, debug: bool = True) -> np.ndarray:
+    def collapse_dates(
+        self,
+        dates: np.ndarray,
+        *,
+        use_local_time: bool,
+        debug: bool = True,
+        base_step: float | None = None,
+    ) -> np.ndarray:
         orig_dates = np.array(dates, copy=True, dtype=float)
         self.dates_real = np.array(orig_dates, copy=True, dtype=float)
 
-        base_step = self._compute_base_step(orig_dates)
+        base_step = self._compute_base_step(orig_dates) if base_step is None else float(base_step)
 
         gaps_n_chunks = self.find_gaps_and_chunks(orig_dates)
         if debug:
             print(gaps_n_chunks)
 
-        # For each gap, remove only (gap_delta - base_step) so we preserve one normal interval.
         total_shift = np.zeros_like(orig_dates, dtype=float)
-
-        # sort gaps by start time so behavior is deterministic
-        gaps_sorted = sorted(gaps_n_chunks, key=lambda it: it.get("start", float("inf")))
-        for item in gaps_sorted:
-            # accept either 'type' or 'Type'
-            itype = str(item.get("type", item.get("Type", ""))).lower()
-            if itype != "gap":
-                if debug:
-                    print(f"Skipping non-gap item: {item}")
-                continue
-
-            start = item.get("start", None)
-            stop = item.get("stop", None)
-            if start is None or stop is None:
-                if debug:
-                    print(f"Skipping malformed gap item: {item}")
-                continue
-
-            gap_delta = float(stop - start)
-            remove = max(0.0, gap_delta - base_step)
-            # shift timestamps at/after the first sample after the gap
-            mask = orig_dates >= float(stop)
-            total_shift[mask] += remove
+        ordered = np.sort(orig_dates[np.isfinite(orig_dates)])
+        gap_indices = _gap_indices(ordered, base_step)
+        for gap_index in gap_indices:
+            start = float(ordered[gap_index])
+            stop = float(ordered[gap_index + 1])
+            remove = float(stop - start - base_step)
+            total_shift[orig_dates >= stop] += remove
             if debug:
                 print(
                     f"Will collapse gap from {start} to {stop}, remove {remove} seconds "
@@ -501,6 +699,7 @@ class GapCollapseManager:
             self.time_map = GapCollapsedTimeMap.from_real_series(
                 np.array(self.dates_real, copy=False, dtype=float),
                 use_local_time=use_local_time,
+                base_step=base_step,
             )
             self.time_is_collapsed = True
         except Exception as exc:
@@ -517,6 +716,7 @@ class GapCollapseManager:
         *,
         use_local_time: bool,
         debug: bool = True,
+        base_step: float | None = None,
     ) -> np.ndarray:
         """Vectorized gap-collapsing implementation.
 
@@ -527,33 +727,20 @@ class GapCollapseManager:
         orig_dates = np.array(dates, copy=True, dtype=float)
         self.dates_real = np.array(orig_dates, copy=True, dtype=float)
 
-        base_step = self._compute_base_step(orig_dates)
+        base_step = self._compute_base_step(orig_dates) if base_step is None else float(base_step)
 
         gaps_n_chunks = self.find_gaps_and_chunks(orig_dates)
         if debug:
             print(gaps_n_chunks)
 
         total_shift = np.zeros_like(orig_dates, dtype=float)
-
-        gaps_sorted = sorted(gaps_n_chunks, key=lambda it: it.get("start", float("inf")))
-        for item in gaps_sorted:
-            itype = str(item.get("type", item.get("Type", ""))).lower()
-            if itype != "gap":
-                if debug:
-                    print(f"Skipping non-gap item: {item}")
-                continue
-
-            start = item.get("start", None)
-            stop = item.get("stop", None)
-            if start is None or stop is None:
-                if debug:
-                    print(f"Skipping malformed gap item: {item}")
-                continue
-
-            gap_delta = float(stop - start)
-            remove = max(0.0, gap_delta - base_step)
-            mask = orig_dates >= float(stop)
-            total_shift[mask] += remove
+        ordered = np.sort(orig_dates[np.isfinite(orig_dates)])
+        gap_indices = _gap_indices(ordered, base_step)
+        for gap_index in gap_indices:
+            start = float(ordered[gap_index])
+            stop = float(ordered[gap_index + 1])
+            remove = float(stop - start - base_step)
+            total_shift[orig_dates >= stop] += remove
             if debug:
                 print(
                     f"Will collapse gap from {start} to {stop}, remove {remove} seconds "
@@ -566,6 +753,7 @@ class GapCollapseManager:
             self.time_map = GapCollapsedTimeMap.from_real_series(
                 np.array(self.dates_real, copy=False, dtype=float),
                 use_local_time=use_local_time,
+                base_step=base_step,
             )
             self.time_is_collapsed = True
         except Exception as exc:
