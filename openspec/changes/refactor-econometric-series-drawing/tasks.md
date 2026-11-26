@@ -24,4 +24,4 @@
 
 - [x] 4.1 Document the public styling options, units, defaults, limitations, and migration from native attributes and kwargs in the README and class API.
 - [x] 4.2 Validate this change with `openspec validate refactor-econometric-series-drawing --strict`.
-- [ ] 4.3 Before archiving this change, archive `add-econometric-series-collapse-source` and ensure its econometric requirements are present; preserve the separately proposed axis-assignment requirements.
+- [x] 4.3 Before archiving this change, archive `add-econometric-series-collapse-source` and ensure its econometric requirements are present; preserve the separately proposed axis-assignment requirements.
