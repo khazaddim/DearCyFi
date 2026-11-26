@@ -10,6 +10,7 @@ import numpy as np
 from .PyTimeLocator import locator_time3
 from .DCG_Candle_Utils import PlotCandleStick
 from .candle_utils.gap_utils import GapCollapseManager
+from .candle_indicators import CandleIndicatorManager
 from .range_box_tools import AnchorTooltipCoordinator, InteractiveTool, RangeBoxDiagnosticSnapshot, RangeBoxGeometry, RangeBoxTool
 from .streaming import classify_append_spacing, finite_timestamp, infer_cadence, latest_interval_matches
 
@@ -38,8 +39,9 @@ class TimeSeriesRegistration:
 
 
 class _CandleSeriesAdapter:
-    def __init__(self, candle: PlotCandleStick) -> None:
+    def __init__(self, candle: PlotCandleStick, chart: object | None = None) -> None:
         self.candle = candle
+        self.chart = chart
 
     @property
     def source_dates(self) -> np.ndarray:
@@ -227,6 +229,7 @@ class DearCyFi(dcg.Plot):
         self._tools: list[InteractiveTool] = []
         self._tool_ids: set[str] = set()
         self._next_tool_number = 1
+        self._indicator_manager = CandleIndicatorManager(self)
         self._anchor_tooltips_enabled = True
         self._anchor_tooltip_coordinator = AnchorTooltipCoordinator(self)
         self._last_resize_time_format_info: dict[str, object] = {}
@@ -554,6 +557,43 @@ class DearCyFi(dcg.Plot):
             source_dates.size < 2 or np.all(np.diff(source_dates) >= 0)
         )
 
+    @property
+    def indicator_manager(self):
+        return self._indicator_manager
+
+    @property
+    def indicator_instances(self) -> dict[str, object]:
+        return self._indicator_manager.instances
+
+    @property
+    def indicator_ids(self) -> tuple[str, ...]:
+        return self._indicator_manager.indicator_ids
+
+    def create_indicator(
+        self,
+        *,
+        type: str = "SMA",
+        period: object = 20,
+        field: str = "close",
+        y_axis: dcg.Axis = dcg.Axis.Y1,
+        **kwargs,
+    ):
+        return self._indicator_manager.create(
+            type=type,
+            period=period,
+            field=field,
+            y_axis=y_axis,
+            **kwargs,
+        )
+
+    add_indicator = create_indicator
+
+    def edit_indicator(self, instance_id: str, *, period: object, field: str):
+        return self._indicator_manager.edit(instance_id, period=period, field=field)
+
+    def remove_indicator(self, instance_id: str) -> None:
+        self._indicator_manager.remove(instance_id)
+
     def _stream_interval(self, series_id: str, *, cache: bool = True) -> float:
         if series_id in self._stream_cadences:
             return self._stream_cadences[series_id]
@@ -728,6 +768,10 @@ class DearCyFi(dcg.Plot):
         else:
             candidate_dates[series_id] = np.asarray(prepared["dates"], dtype=float).copy()
 
+        prepared_indicator_states = None
+        if series_id == "candles" and self._indicator_manager.indicator_ids:
+            prepared_indicator_states = self._indicator_manager.prepare_candle_state(prepared)
+
         manager_dates = old_manager[0]
         if selected_source_append and (
             self._gap_manager.stream_source_id not in (None, series_id)
@@ -751,6 +795,11 @@ class DearCyFi(dcg.Plot):
                     use_local_time=self._time_locator_use_local_time,
                 )
             adapter.publish(prepared)
+            if series_id == "candles" and prepared_indicator_states is not None:
+                self._indicator_manager.publish_candle_state(
+                    prepared,
+                    prepared_results=prepared_indicator_states,
+                )
             for follower_id, projected in candidate_dates.items():
                 if follower_id == series_id:
                     self._plot_dates_by_id[follower_id] = projected.copy()
@@ -801,6 +850,11 @@ class DearCyFi(dcg.Plot):
                 adapter.publish(old_adapter_data)
             except Exception as exc:
                 rollback_errors.append(exc)
+            if series_id == "candles" and prepared_indicator_states is not None:
+                try:
+                    self._indicator_manager.publish_candle_state(old_adapter_data)
+                except Exception as exc:
+                    rollback_errors.append(exc)
             for follower_id in candidate_dates:
                 if follower_id == series_id:
                     continue
@@ -1426,28 +1480,77 @@ class DearCyFi(dcg.Plot):
         time_formatter=None,
         candle_y_axis: dcg.Axis = dcg.Axis.Y1,
     ) -> None:
+        old_present = self.candlestick_plot is not None
+        old_candle_state = None
+        if old_present:
+            old_candle_state = {
+                "dates": np.asarray(self.candlestick_plot.dates, dtype=float).copy(),
+                "source_dates": np.asarray(self.candlestick_plot.source_dates, dtype=float).copy(),
+                "opens": np.asarray(self.candlestick_plot.opens, dtype=float).copy(),
+                "highs": np.asarray(self.candlestick_plot.highs, dtype=float).copy(),
+                "lows": np.asarray(self.candlestick_plot.lows, dtype=float).copy(),
+                "closes": np.asarray(self.candlestick_plot.closes, dtype=float).copy(),
+                "volumes": np.asarray(self.candlestick_plot.volumes, dtype=float).copy(),
+                "y_axis": getattr(self.candlestick_plot, "y_axis", dcg.Axis.Y1),
+                "index": np.asarray(self.index).copy(),
+                "index_is_default": bool(self._index_is_default),
+            }
+
+        new_dates = np.asarray(dates, dtype=float)
+        new_opens = np.asarray(opens, dtype=float)
+        new_highs = np.asarray(highs, dtype=float)
+        new_lows = np.asarray(lows, dtype=float)
+        new_closes = np.asarray(closes, dtype=float)
+        new_volume = np.zeros_like(new_dates, dtype=float) if volume is None else np.asarray(volume, dtype=float)
+        prepared_indicator_states = None
+        if self._indicator_manager.indicator_ids:
+            prepared = {
+                "dates": new_dates.copy(),
+                "source_dates": new_dates.copy(),
+                "opens": new_opens.copy(),
+                "highs": new_highs.copy(),
+                "lows": new_lows.copy(),
+                "closes": new_closes.copy(),
+                "volumes": new_volume.copy(),
+            }
+            prepared_indicator_states = self._indicator_manager.prepare_candle_state(prepared)
+
         if self._gap_manager.time_is_collapsed:
             self.restore_time_chart()
         self._stream_cadences.clear()
-        self.dates = np.asarray(dates)
-        self.opens = np.asarray(opens)
-        self.highs = np.asarray(highs)
-        self.lows = np.asarray(lows)
-        self.closes = np.asarray(closes)
+        self.dates = new_dates
+        self.opens = new_opens
+        self.highs = new_highs
+        self.lows = new_lows
+        self.closes = new_closes
         self.index = np.asarray(index) if index is not None else np.arange(self.dates.shape[0])
         self._index_is_default = index is None
-        if volume is None:
-            self.volume = np.zeros_like(self.dates, dtype=float)
-        else:
-            self.volume = np.asarray(volume)
+        self.volume = new_volume
 
         if time_formatter is None:
             time_formatter = "auto"
 
-        if self.candlestick_plot is None:
-            with self:
-                self.candlestick_plot = PlotCandleStick(
-                    self.context,
+        try:
+            if self.candlestick_plot is None:
+                with self:
+                    self.candlestick_plot = PlotCandleStick(
+                        self.context,
+                        dates=self.dates,
+                        source_dates=self.dates,
+                        opens=self.opens,
+                        closes=self.closes,
+                        lows=self.lows,
+                        highs=self.highs,
+                        volumes=self.volume,
+                        volume_kwargs=(volume_kwargs or {}),
+                        label=candle_label,
+                        weight=candle_weight,
+                        time_formatter=time_formatter,
+                        y_axis=candle_y_axis,
+                    )
+            else:
+                self.candlestick_plot.y_axis = candle_y_axis
+                self.candlestick_plot.update_all(
                     dates=self.dates,
                     source_dates=self.dates,
                     opens=self.opens,
@@ -1455,25 +1558,55 @@ class DearCyFi(dcg.Plot):
                     lows=self.lows,
                     highs=self.highs,
                     volumes=self.volume,
-                    volume_kwargs=(volume_kwargs or {}),
-                    label=candle_label,
-                    weight=candle_weight,
-                    time_formatter=time_formatter,
-                    y_axis=candle_y_axis,
                 )
-        else:
-            self.candlestick_plot.y_axis = candle_y_axis
-            self.candlestick_plot.update_all(
-                dates=self.dates,
-                source_dates=self.dates,
-                opens=self.opens,
-                closes=self.closes,
-                lows=self.lows,
-                highs=self.highs,
-                volumes=self.volume,
-            )
+            if prepared_indicator_states is not None:
+                prepared = {
+                    "dates": new_dates.copy(),
+                    "source_dates": new_dates.copy(),
+                    "opens": new_opens.copy(),
+                    "highs": new_highs.copy(),
+                    "lows": new_lows.copy(),
+                    "closes": new_closes.copy(),
+                    "volumes": new_volume.copy(),
+                }
+                self._indicator_manager.publish_candle_state(
+                    prepared,
+                    prepared_results=prepared_indicator_states,
+                )
+        except Exception as original_error:
+            rollback_errors = []
+            if old_present and old_candle_state is not None:
+                try:
+                    self.dates = old_candle_state["dates"]
+                    self.opens = old_candle_state["opens"]
+                    self.highs = old_candle_state["highs"]
+                    self.lows = old_candle_state["lows"]
+                    self.closes = old_candle_state["closes"]
+                    self.volume = old_candle_state["volumes"]
+                    self.index = old_candle_state["index"]
+                    self._index_is_default = old_candle_state["index_is_default"]
+                    self.candlestick_plot.y_axis = old_candle_state["y_axis"]
+                    self.candlestick_plot.update_all(
+                        dates=old_candle_state["dates"],
+                        source_dates=old_candle_state["source_dates"],
+                        opens=old_candle_state["opens"],
+                        closes=old_candle_state["closes"],
+                        lows=old_candle_state["lows"],
+                        highs=old_candle_state["highs"],
+                        volumes=old_candle_state["volumes"],
+                    )
+                    self._indicator_manager.publish_candle_state(old_candle_state)
+                    self._gap_manager.reset(old_candle_state["source_dates"])
+                except Exception as exc:
+                    rollback_errors.append(exc)
+            if rollback_errors:
+                raise RuntimeError(
+                    "Candle replacement failed and rollback also failed: "
+                    + "; ".join(str(error) for error in rollback_errors)
+                ) from original_error
+            raise
 
-        candle_adapter = _CandleSeriesAdapter(self.candlestick_plot)
+        candle_adapter = _CandleSeriesAdapter(self.candlestick_plot, self)
         self.register_time_series(
             "candles",
             candle_adapter,

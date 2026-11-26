@@ -47,6 +47,11 @@ modifying the original-time comparison plot.
   `_DrawnHoverCondition` for hover lifetime and source timestamps in tooltips.
   Preserve legend UI children on redraw. Host UI owns the popup widgets; they
   are not part of the mathematical calculator.
+- Expose indicator line styling explicitly as `line_color` and
+  `line_thickness`. Reuse the econometric series conventions: `line_color` is
+  an RGBA tuple and `line_thickness` is a positive finite number of screen
+  pixels. Validate before changing an instance and preserve style across
+  candle recalculation and parameter edits.
 
 Exact public names and minimal protocol signatures should be established during
 implementation; the required observable behavior is specified in the delta.
@@ -97,6 +102,10 @@ Add a left-side indicator panel with type selection (SMA initially), period,
 OHLC input, and Add. Each successful click adds a distinct instance, including
 when type and parameters match an existing instance. Show validation errors
 without adding a partial instance.
+
+The add and edit UI should expose line color and line thickness. Line thickness
+uses the existing screen-pixel convention; invalid Apply values keep the popup
+open and leave both parameters and style unchanged.
 
 Each legend entry has its own menu with Edit and Remove. Edit opens a popup
 prepopulated from that exact instance; Apply validates and updates it, while

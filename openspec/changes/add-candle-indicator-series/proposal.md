@@ -19,6 +19,8 @@ when a candle changes.
   right-click legend menu that opens a parameter editor and offers removal.
 - Preserve menu controls across redraws and retain each indicator's identity,
   visibility, and styling when its parameters change.
+- Allow each indicator instance to use an independent line color and positive
+  screen-pixel line thickness, configurable through the public API and demo.
 - Document and test numerical results, lifecycle, error handling, streaming,
   time collapse, legend interactions, and demo behavior.
 

@@ -120,6 +120,50 @@ The optional label-overlap and date-context diagnostics reserve `Y2` as a
 hidden fixed scale while enabled. Use `Y1` or `Y3` for application data when
 those diagnostics are active.
 
+## Candle Indicators
+
+SMA indicators can be calculated directly or managed by a `DearCyFi` chart:
+
+```python
+from dearcyfi import SMA
+
+result = SMA(period=20, field="close").calculate({
+	"dates": candle_dates,
+	"opens": opens,
+	"highs": highs,
+	"lows": lows,
+	"closes": closes,
+})
+sma_values = result["sma"]
+
+instance = chart.create_indicator(
+	type="SMA",
+	period=20,
+	field="close",
+	y_axis=dcg.Axis.Y1,
+)
+```
+
+The SMA period is a positive integer count of existing candle observations.
+The input field is `open`, `high`, `low`, or `close`. Output is `NaN` until
+the window is complete and is `NaN` whenever any value in the window is
+non-finite. Timestamp gaps do not add synthetic observations or reset the
+window. Indicator instances have independent stable IDs and legend entries;
+valid edits preserve legend visibility, style, Y-axis, viewport, and time
+projection.
+
+Use chart methods to change a managed indicator:
+
+```python
+chart.edit_indicator(instance.instance_id, period=30, field="high")
+chart.remove_indicator(instance.instance_id)
+```
+
+Candle replacement, latest-candle revision, append, and generic
+`append_sample("candles", ...)` / `update_last_sample("candles", ...)`
+operations recalculate every managed indicator from canonical candle values.
+Direct mutation of an indicator is unsupported; mutate candles instead.
+
 ## Collapse Source Selection
 
 `DearCyFi.set_data(...)` registers its candle series as `"candles"` and selects

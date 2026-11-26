@@ -82,6 +82,24 @@ Each indicator instance SHALL render as one independently toggleable legend item
 - **THEN** its identity, legend visibility, styles, Y-axis assignment, popup controls, and viewport limits are preserved
 - **AND** missing or warm-up values break the line rather than being interpolated
 
+### Requirement: Independent Indicator Line Styling
+Each indicator instance SHALL expose an independent validated line color and line thickness while remaining a single legend-enabled drawing item.
+
+#### Scenario: Create with a custom line style
+- **WHEN** a caller creates or adds an indicator with a valid RGBA line color and positive finite screen-pixel thickness
+- **THEN** the indicator's `DrawPolyline` children use that color and thickness
+- **AND** the style belongs only to that indicator instance
+
+#### Scenario: Edit line styling
+- **WHEN** a caller or the demo edits an indicator's line color or thickness
+- **THEN** the line redraws with the validated style
+- **AND** the instance ID, parameters, legend visibility, Y-axis, source timestamps, and plot projection remain unchanged
+
+#### Scenario: Reject invalid line styling
+- **WHEN** line thickness is not a positive finite number or line color is malformed
+- **THEN** creation or editing fails with a clear error
+- **AND** an existing indicator's style and chart state remain unchanged
+
 ### Requirement: Transactional Indicator Lifecycle
 The system SHALL validate and prepare indicator creation and parameter edits before publishing them, and SHALL remove an indicator's chart registration, drawing item, and associated UI resources when it is removed.
 
@@ -109,7 +127,7 @@ The demo SHALL provide a left-side control for adding SMA instances and a per-in
 
 #### Scenario: Open and apply an edit
 - **WHEN** the user right-clicks an indicator legend entry and selects Edit
-- **THEN** a popup opens with that instance's current period and input field
+- **THEN** a popup opens with that instance's current period, input field, line color, and line thickness
 - **AND** Apply updates only that instance after successful validation
 
 #### Scenario: Cancel or reject an edit
