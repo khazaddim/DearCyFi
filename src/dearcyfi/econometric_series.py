@@ -157,7 +157,7 @@ class PlotEconometricSeries(dcg.DrawInPlot):
     def render(self) -> None:
         """Rebuild all drawing primitives from the current plot dates and values."""
         self._clear_active_tooltip()
-        self.children = []
+        self.children = [child for child in self.children if isinstance(child, dcg.uiItem)]
         runs = self._finite_runs()
         buttons = []
         with self:

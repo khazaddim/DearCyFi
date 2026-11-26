@@ -308,7 +308,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         width_percent = self._weight
         half_width = ((self._dates[1] - self._dates[0]) * width_percent) if count > 1 else width_percent
         self._clear_active_tooltip()
-        self.children = []
+        self.children = [child for child in self.children if isinstance(child, dcg.uiItem)]
         buttons = []
         with self:
             for i in range(count):

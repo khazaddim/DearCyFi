@@ -69,3 +69,16 @@ def test_switching_and_rebuilding_tooltip_targets_removes_old_conditions(series)
     assert series._active_tooltip_condition is None
     assert not any(isinstance(handler, _DrawnHoverCondition) for handler in second.handlers)
     assert all(button is not first and button is not second for button in _buttons(series))
+
+
+def test_redraw_preserves_legend_widgets_and_replaces_drawing_children(series):
+    with series:
+        menu_button = dcg.Button(series.context, label="Identify this series")
+    old_buttons = _buttons(series)
+
+    series.render()
+
+    assert menu_button.parent is series
+    assert menu_button in series.children
+    assert all(button not in series.children for button in old_buttons)
+    assert _buttons(series)
