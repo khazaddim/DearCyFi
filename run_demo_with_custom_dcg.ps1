@@ -13,5 +13,5 @@ Write-Host "Python: $(python --version)" -ForegroundColor Gray
 Write-Host "DearCyGui: $(python -c 'import dearcygui; print(dearcygui.__version__)')" -ForegroundColor Gray
 Write-Host "`n" -ForegroundColor Gray
 
-cd examples\DearCyFi_Demo
-python DearCyFi_Demo.py
+# cd examples\DearCyFi_Demo
+python examples\DearCyFi_Demo\DearCyFi_Demo.py
