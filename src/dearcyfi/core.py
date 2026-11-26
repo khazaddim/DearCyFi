@@ -1173,6 +1173,9 @@ class DearCyFi(dcg.Plot):
         if candle_registration is not None:
             self.dates = np.asarray(candle_registration.series.source_dates, dtype=float).copy()
         self._refresh_registered_tools()
+        if self._last_axis_resize_info is not None:
+            self.axes_resize_callback(None, None, [self._last_axis_resize_info])
+        self.context.viewport.wake(full_refresh=True)
 
     @staticmethod
     def _format_spec_to_dict(spec) -> dict[str, object]:
@@ -1542,6 +1545,8 @@ class DearCyFi(dcg.Plot):
                 self._time_series[series_id].series.set_plot_dates(dates)
                 self._plot_dates_by_id[series_id] = np.asarray(dates, dtype=float).copy()
             self._refresh_registered_tools()
+            if self._last_axis_resize_info is not None:
+                self.axes_resize_callback(None, None, [self._last_axis_resize_info])
         except Exception:
             self.restore_time_chart()
             raise
@@ -1555,6 +1560,7 @@ class DearCyFi(dcg.Plot):
             dump_text = self._gap_manager.time_map.debug_dump(limit=16)
             status_msg = f"{status_msg}\n\n{dump_text}"
         self._set_status(status_msg)
+        self.context.viewport.wake(full_refresh=True)
 
     def collapse_time_chart_vec(self, sender=None, app_data=None, user_data=None, *, debug: bool = True) -> None:
         self._collapse_registered_series(debug=debug, vectorized=True)

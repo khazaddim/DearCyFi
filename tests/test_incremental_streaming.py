@@ -203,6 +203,56 @@ def test_collapsed_gap_extension_reprojects_only_follower_suffix(chart):
     assert chart.dates[-1] == pytest.approx(1_700_001_500.0)
 
 
+def test_restore_after_streaming_preserves_data_and_refreshes_time_axis(chart):
+    with chart:
+        follower = PlotEconometricSeries(
+            chart.context,
+            dates=[1_700_000_750.0, 1_700_002_000.0],
+            values=[1.0, 2.0],
+            tooltip=False,
+        )
+    chart.register_time_series("liquidity", follower, in_gap="previous")
+    chart.collapse_time_chart(debug=False)
+    axis_info = (1_699_999_900.0, 1_700_002_400.0, 2.5)
+    chart.axes_resize_callback(None, None, [axis_info])
+    chart.append_candle(
+        timestamp=1_700_001_500.0,
+        open=13.0,
+        high=15.0,
+        low=12.0,
+        close=14.0,
+        volume=50.0,
+    )
+    chart.update_last_candle(close=14.5, volume=75.0)
+    collapsed_labels = list(chart.X1.labels)
+
+    chart.restore_time_chart()
+
+    np.testing.assert_array_equal(chart.dates, chart.candlestick_plot.source_dates)
+    np.testing.assert_array_equal(follower.plot_dates, follower.source_dates)
+    assert chart.dates[-1] == 1_700_001_500.0
+    assert chart.closes[-1] == 14.5
+    assert chart.volume[-1] == 75.0
+    assert chart.collapse_source_id == "candles"
+    restored_labels = list(chart.X1.labels)
+    chart.axes_resize_callback(None, None, [axis_info])
+    assert restored_labels == list(chart.X1.labels)
+    assert restored_labels != collapsed_labels
+
+    chart.append_candle(
+        timestamp=1_700_001_800.0,
+        open=14.5,
+        high=16.0,
+        low=14.0,
+        close=15.0,
+    )
+    assert chart.dates[-1] == 1_700_001_800.0
+    chart.collapse_time_chart(debug=False)
+    recollapsed_labels = list(chart.X1.labels)
+    chart.axes_resize_callback(None, None, [axis_info])
+    assert recollapsed_labels == list(chart.X1.labels)
+
+
 def test_tool_anchors_and_boundary_anchors_refresh_after_gap_append():
     chart = DearCyFi(dcg.Context(), prewarm=False, use_local_time=False)
     chart.set_data(
