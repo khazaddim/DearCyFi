@@ -26,9 +26,12 @@
 - [x] 4.6 Inject preparation and publication failures and verify data/map/presentation coherence; cover hidden series, assigned axes, volume, and tooltip source dates.
 - [x] 4.7 Run targeted existing gap-projection, collapse-coordination, candle/econometric, axis, cursor-tag, and tool suites plus the new focused tests using the workspace's custom DearCyGui environment.
 - [ ] 4.8 Test deterministic synthetic revisions and appends, gap injection, serialized application, comparison-plot synchronization, duplicate starts, cancellation/reload, and error reporting.
+  - Generator revision, append, and gap tests passed on 2026-11-26; demo lifecycle and synchronization coverage remains.
 - [ ] 4.9 Run and record the demo visual walkthrough using the custom DearCyGui environment.
+  - On 2026-11-26, the user exercised gap injection and collapse/restore; follower behavior still needs closer verification.
 
 ## 5. Documentation and approval
 - [x] 5.1 Document public signatures, return shapes, seconds/interval-start semantics, tolerance formula, errors, cadence lifecycle, and a provider-neutral serialized async-consumer example in README.
 - [x] 5.2 Document deferred initial bulk collection, broker adapters, historical correction, calendar policies, and rendering optimizations.
 - [ ] 5.3 Validate the implemented change with `openspec validate add-incremental-series-streaming --strict --no-interactive` and request review.
+  - Strict validation passed on 2026-11-26; review remains outstanding.
