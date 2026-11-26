@@ -230,6 +230,7 @@ class DearCyFi(dcg.Plot):
         self._anchor_tooltips_enabled = True
         self._anchor_tooltip_coordinator = AnchorTooltipCoordinator(self)
         self._last_resize_time_format_info: dict[str, object] = {}
+        self._last_axis_resize_info: tuple[float, ...] | None = None
         self._cursor_tag_formatter = self._coerce_cursor_tag_formatter(cursor_tag_formatter)
         self._cursor_tag_bullish_color = dcg.color_as_int(cursor_tag_bullish_color)
         self._cursor_tag_bearish_color = dcg.color_as_int(cursor_tag_bearish_color)
@@ -783,12 +784,12 @@ class DearCyFi(dcg.Plot):
                 if new_timestamp is not None:
                     next_index = len(self.index) if self._index_is_default else new_timestamp
                     self.index = np.append(self.index, next_index)
-            if "candles" in candidate_dates and len(self.index) == len(self.dates):
-                self._apply_custom_x_labels(
-                    [str(value) for value in self.index],
-                    self.dates,
-                    no_gridlines=[False] * len(self.index),
-                )
+            if (
+                selected_source_append
+                and self._gap_manager.time_is_collapsed
+                and self._last_axis_resize_info is not None
+            ):
+                self.axes_resize_callback(None, None, [self._last_axis_resize_info])
             self.context.viewport.wake(full_refresh=True)
         except Exception as original_error:
             if map_snapshot is not None and old_manager[2] is not None:
@@ -1730,6 +1731,9 @@ class DearCyFi(dcg.Plot):
         min_time = float(x_axis_info[0])
         max_time = float(x_axis_info[1])
         scaling_factor = float(x_axis_info[2]) if len(x_axis_info) >= 3 else None
+        self._last_axis_resize_info = (min_time, max_time)
+        if scaling_factor is not None:
+            self._last_axis_resize_info += (scaling_factor,)
 
         span = abs(max_time - min_time)
         if scaling_factor is not None and np.isfinite(scaling_factor) and scaling_factor > 0:

@@ -82,6 +82,57 @@ def test_append_and_partial_candle_revision_keep_chart_caches_consistent(chart):
     assert len(chart.candlestick_plot.source_dates) == 4
 
 
+@pytest.mark.parametrize("collapsed", [False, True])
+def test_streaming_keeps_time_axis_labels_instead_of_candle_indices(chart, collapsed):
+    if collapsed:
+        chart.collapse_time_chart(debug=False)
+    axis_info = (1_699_999_900.0, 1_700_002_400.0, 2.5)
+    chart.axes_resize_callback(None, None, [axis_info])
+    initial_labels = list(chart.X1.labels)
+    initial_coords = list(chart.X1.labels_coord)
+
+    chart.update_last_candle(close=13.5)
+    assert list(chart.X1.labels) == initial_labels
+    assert list(chart.X1.labels_coord) == initial_coords
+
+    chart.append_candle(
+        timestamp=1_700_000_900.0,
+        open=13.0,
+        high=15.0,
+        low=12.0,
+        close=14.0,
+    )
+    labels_after_append = list(chart.X1.labels)
+    coords_after_append = list(chart.X1.labels_coord)
+    chart.axes_resize_callback(None, None, [axis_info])
+    assert labels_after_append == list(chart.X1.labels)
+    assert coords_after_append == list(chart.X1.labels_coord)
+    assert labels_after_append != [str(value) for value in chart.index]
+    if collapsed:
+        assert labels_after_append != initial_labels
+    else:
+        assert labels_after_append == initial_labels
+
+
+def test_collapsed_gap_append_refreshes_visible_time_labels(chart):
+    chart.collapse_time_chart(debug=False)
+    axis_info = (1_699_999_900.0, 1_700_002_400.0, 2.5)
+    chart.axes_resize_callback(None, None, [axis_info])
+    before = list(chart.X1.labels)
+
+    chart.append_candle(
+        timestamp=1_700_001_500.0,
+        open=13.0,
+        high=15.0,
+        low=12.0,
+        close=14.0,
+    )
+    labels_after_append = list(chart.X1.labels)
+    chart.axes_resize_callback(None, None, [axis_info])
+    assert labels_after_append == list(chart.X1.labels)
+    assert labels_after_append != before
+
+
 def test_invalid_candle_revision_and_short_append_are_transactional(chart):
     before_dates = chart.candlestick_plot.source_dates.copy()
     before_highs = np.asarray(chart.candlestick_plot.highs).copy()

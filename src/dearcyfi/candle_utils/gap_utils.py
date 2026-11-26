@@ -684,7 +684,8 @@ class GapCollapseManager:
         for gap_index in gap_indices:
             start = float(ordered[gap_index])
             stop = float(ordered[gap_index + 1])
-            remove = float(stop - start - base_step)
+            gap_delta = stop - start
+            remove = gap_delta - base_step
             total_shift[orig_dates >= stop] += remove
             if debug:
                 print(
@@ -739,7 +740,8 @@ class GapCollapseManager:
         for gap_index in gap_indices:
             start = float(ordered[gap_index])
             stop = float(ordered[gap_index + 1])
-            remove = float(stop - start - base_step)
+            gap_delta = stop - start
+            remove = gap_delta - base_step
             total_shift[orig_dates >= stop] += remove
             if debug:
                 print(

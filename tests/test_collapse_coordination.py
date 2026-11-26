@@ -59,6 +59,20 @@ def test_selected_source_drives_follower_projection_and_restoration(chart):
     np.testing.assert_array_equal(follower.plot_dates, follower.source_dates)
 
 
+@pytest.mark.parametrize("method_name", ["collapse_time_chart", "collapse_time_chart_vec"])
+def test_collapse_with_default_debug_reports_gap_and_restores(chart, capsys, method_name):
+    source = FakeSeries([0, 10, 20, 100, 110])
+    chart.register_time_series("source", source)
+    chart.collapse_source_id = "source"
+
+    getattr(chart, method_name)()
+
+    np.testing.assert_array_equal(source.plot_dates, [0, 10, 20, 30, 40])
+    assert "remove 70.0 seconds (delta=80.0, base=10.0)" in capsys.readouterr().out
+    chart.restore_time_chart()
+    np.testing.assert_array_equal(source.plot_dates, source.source_dates)
+
+
 def test_removing_active_source_restores_followers_and_clears_selection(chart):
     source = FakeSeries([0, 10, 20, 100, 110])
     follower = FakeSeries([50])
