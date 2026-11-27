@@ -63,10 +63,18 @@ and existing date-label and diagnostic settings through its native plot menu.
 ### Requirement: Demo gap controls reside in the chart menu
 
 The demo SHALL remove its sidebar gap and diagnostic controls in favor of the
-chart's context menu while retaining unrelated bar-loading controls.
+chart's context menu, move bar-loading controls to `Fake Candle Controls`, and
+remove the empty `Collapsing Controls` section.
 
 #### Scenario: Access gap controls in the demo
 - **WHEN** the demo is running with the required custom DearCyGui build
 - **THEN** users access collapse, method selection, source status, gap reporting,
   and date-label diagnostics through the chart's context menu
 - **AND** the demo sidebar no longer duplicates those controls
+- **AND** the `Collapsing Controls` section is no longer present
+
+#### Scenario: Load bar data in the demo
+- **WHEN** the user opens `Fake Candle Controls`
+- **THEN** the existing `Load Bar Data` button and `Bar Length Mode` selector
+  are available there
+- **AND** bar loading continues to use the selected mode

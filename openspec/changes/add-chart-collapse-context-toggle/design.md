@@ -56,16 +56,18 @@ build must fail explicitly with an actionable message, not silently omit the
 controls. Keep existing Python collapse, restore, source-selection, and
 diagnostic APIs available to hosts.
 
-Remove the moved controls from the demo's `Collapsing Controls` section. Keep
-its unrelated bar data and bar-length mode controls accessible, possibly under
-a more appropriate section name. The demo status area remains available for
-gap reports.
+Move the `Load Bar Data` button and `Bar Length Mode` selector from the demo's
+`Collapsing Controls` section to `Fake Candle Controls`, preserving their
+existing callback and selected-mode behavior. Remove the now-empty
+`Collapsing Controls` section. The demo status area remains available for gap
+reports.
 
 ## Validation
 
 Test scalar and vectorized routing, restore, checkmark synchronization after
 direct calls and source/data changes, missing source and failure behavior,
-diagnostic properties, source display, and unsupported builds. Verify rendered
+diagnostic properties, source display, unsupported builds, and bar loading in
+its new demo location. Verify rendered
 interaction with the installed custom wheel, including existing native menu
 entries and `no_menus`/`menu_button` behavior. Use existing demo documentation
 and targeted test conventions; do not modify DearCyGui itself.

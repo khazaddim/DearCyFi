@@ -15,8 +15,9 @@ DearCyGui build now supports extending the native plot context menu.
   `Diagnostics` submenu. Show the selected collapse source in the menu.
 - Keep checkmarks synchronized with actual chart state and properties, including
   direct API calls, data replacement, source changes, and failed collapse.
-- Remove the corresponding controls from the demo sidebar while preserving
-  unrelated bar-loading controls and all existing programmatic APIs.
+- Move the bar-loading button and bar-length mode selector to `Fake Candle
+  Controls`, then remove the empty `Collapsing Controls` section.
+- Preserve all existing programmatic APIs.
 - Preserve the native plot menu, add focused tests, and update documentation.
 
 ## Impact
