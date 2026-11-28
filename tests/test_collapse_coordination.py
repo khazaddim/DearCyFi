@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
 import dearcygui as dcg
 
@@ -23,7 +24,8 @@ class FakeSeries:
 
 
 @pytest.fixture
-def chart():
+def chart(monkeypatch):
+    monkeypatch.setattr(DearCyFi, "_install_context_menu", lambda self: None)
     return DearCyFi(dcg.Context(), prewarm=False)
 
 
@@ -119,3 +121,127 @@ def test_set_data_can_move_existing_candle_composite_to_another_y_axis(chart):
     assert chart.candlestick_plot.y_axis == dcg.Axis.Y3
     assert chart.candlestick_plot.axes == (dcg.Axis.X1, dcg.Axis.Y3)
     assert chart.candlestick_plot._volume_bar_series.axes == (dcg.Axis.X1, dcg.Axis.Y3)
+
+
+def test_context_menu_routes_to_selected_collapse_method(chart, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        chart,
+        "collapse_time_chart",
+        lambda sender=None, app_data=None, user_data=None, **kwargs: calls.append("scalar"),
+    )
+    monkeypatch.setattr(
+        chart,
+        "collapse_time_chart_vec",
+        lambda sender=None, app_data=None, user_data=None, **kwargs: calls.append("vectorized"),
+    )
+
+    chart.vectorized_collapse = True
+    chart._on_collapse_menu_action(SimpleNamespace(value=False), None, True)
+    assert calls == ["vectorized"]
+
+    chart.vectorized_collapse = False
+    chart._on_collapse_menu_action(SimpleNamespace(value=False), None, True)
+    assert calls[-1] == "scalar"
+
+    chart._on_vectorized_menu_action(SimpleNamespace(value=True), None, False)
+    assert chart.vectorized_collapse is False
+    chart._on_vectorized_menu_action(SimpleNamespace(value=False), None, True)
+    assert chart.vectorized_collapse is True
+
+
+def test_collapse_menu_callback_uses_toggle_state_and_restores():
+    chart = DearCyFi(dcg.Context(), prewarm=False)
+    source = FakeSeries([0, 10, 20, 100, 110])
+    chart.register_time_series("source", source)
+    chart.collapse_source_id = "source"
+    item = chart._context_menu_items["collapse"]
+
+    item.callbacks[0](item, item, True)
+
+    assert chart.time_is_collapsed
+    assert item.value is True
+    np.testing.assert_array_equal(source.plot_dates, [0, 10, 20, 30, 40])
+
+    item.callbacks[0](item, item, False)
+
+    assert not chart.time_is_collapsed
+    assert item.value is False
+    np.testing.assert_array_equal(source.plot_dates, source.source_dates)
+
+
+def test_diagnostics_menu_callbacks_use_toggle_state():
+    chart = DearCyFi(dcg.Context(), prewarm=False, apply_date_context_labels=False)
+    for key, setting in (
+        ("date_labels", "apply_date_context_labels"),
+        ("date_debug", "date_context_debug"),
+        ("overlap", "label_overlap_debug"),
+        ("vectorized", "vectorized_collapse"),
+    ):
+        item = chart._context_menu_items[key]
+        for checked in (not item.value, item.value):
+            item.callbacks[0](item, item, checked)
+            assert getattr(chart, setting) is checked
+            assert item.value is checked
+
+
+def test_context_menu_method_change_does_not_restore_collapsed_chart(chart):
+    source = FakeSeries([0, 10, 20, 100, 110])
+    chart.register_time_series("source", source)
+    chart.collapse_source_id = "source"
+    chart.collapse_time_chart_vec(debug=False)
+
+    chart.vectorized_collapse = False
+
+    assert chart.time_is_collapsed
+    np.testing.assert_array_equal(source.plot_dates, [0, 10, 20, 30, 40])
+
+
+def test_failed_collapse_restores_context_state(chart, monkeypatch):
+    source = FakeSeries([0, 10, 20, 100, 110])
+    chart.register_time_series("source", source)
+    chart.collapse_source_id = "source"
+    monkeypatch.setattr(
+        chart._gap_manager,
+        "collapse_dates",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="failure"):
+        chart.collapse_time_chart(debug=False)
+
+    assert not chart.time_is_collapsed
+
+
+def test_unsupported_dearcygui_build_reports_compatibility_error(monkeypatch):
+    monkeypatch.setattr(dcg, "Menu", None)
+    with pytest.raises(RuntimeError, match="custom DearCyGui build"):
+        DearCyFi(dcg.Context(), prewarm=False)
+
+
+def test_context_menu_tooltip_attaches_explanatory_text(chart, monkeypatch):
+    class FakeTooltip:
+        def __init__(self, _context, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    texts = []
+    monkeypatch.setattr(dcg, "Tooltip", FakeTooltip)
+    monkeypatch.setattr(
+        dcg,
+        "Text",
+        lambda _context, **kwargs: texts.append(kwargs["value"]),
+    )
+    target = object()
+    chart._context_menu_items = {"collapse": target}
+    chart._context_menu_tooltips = {}
+
+    chart._add_context_menu_tooltip("collapse", "Restore original time.")
+
+    assert chart._context_menu_tooltips["collapse"].kwargs["target"] is target
+    assert texts == ["Restore original time."]

@@ -280,6 +280,10 @@ class DearCyFi(dcg.Plot):
         self._diag_date_context_series = None
         self.date_context_max_gap_px: float = 280.0
         self.date_context_min_spacing_px: float = 160.0
+        self._vectorized_collapse: bool = True
+        self._context_menu_items: dict[str, object] = {}
+        self._context_menu_syncing: bool = False
+        self._install_context_menu()
 
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
@@ -305,6 +309,197 @@ class DearCyFi(dcg.Plot):
         if callable(formatter):
             return formatter
         raise TypeError("cursor_tag_formatter must be a DateTimeSpec, callable, or None")
+
+    @property
+    def vectorized_collapse(self) -> bool:
+        return self._vectorized_collapse
+
+    @vectorized_collapse.setter
+    def vectorized_collapse(self, value: bool) -> None:
+        self._vectorized_collapse = bool(value)
+        self._sync_context_menu_state()
+
+    @property
+    def time_is_collapsed(self) -> bool:
+        return bool(
+            self._gap_manager.time_is_collapsed
+            and self._gap_manager.time_map is not None
+        )
+
+    def _install_context_menu(self) -> None:
+        if not hasattr(dcg, "Menu") or not hasattr(dcg, "MenuItem"):
+            raise RuntimeError(
+                "DearCyFi requires a custom DearCyGui build with plot context-menu "
+                "support. Update DearCyGui to a build that allows Menu/MenuItem "
+                "widgets to be attached to Plot."
+            )
+        probe = None  # tests for DearCyGui Menu/MenuItem support
+        try:
+            probe = dcg.Menu(self.context, parent=self, label="DearCyFi compatibility")
+            probe.delete_item()
+
+            collapse_item = dcg.MenuItem(
+                self.context,
+                parent=self,
+                label="Collapse Time",
+                check=True,
+                value=False,
+                callback=self._on_collapse_menu_action,
+            )
+            vectorized_item = dcg.MenuItem(
+                self.context,
+                parent=self,
+                label="Vectorized Collapse",
+                check=True,
+                value=True,
+                callback=self._on_vectorized_menu_action,
+            )
+            gaps_item = dcg.MenuItem(
+                self.context,
+                parent=self,
+                label="Gaps n' Chunks",
+                callback=self.add_gaps_chunks_GUI,
+            )
+            source_text = dcg.Text(
+                self.context,
+                parent=self,
+                value="Collapse source: not selected",
+            )
+            with dcg.Menu(self.context, parent=self, label="Diagnostics"):
+                date_labels_item = dcg.MenuItem(
+                    self.context,
+                    label="Date Context Labels",
+                    check=True,
+                    value=bool(self.apply_date_context_labels),
+                    callback=self._on_date_labels_menu_action,
+                )
+                date_debug_item = dcg.MenuItem(
+                    self.context,
+                    label="Date Context Diagnostic",
+                    check=True,
+                    value=bool(self.date_context_debug),
+                    callback=self._on_date_debug_menu_action,
+                )
+                overlap_item = dcg.MenuItem(
+                    self.context,
+                    label="Label Overlap Diagnostic",
+                    check=True,
+                    value=bool(self.label_overlap_debug),
+                    callback=self._on_overlap_debug_menu_action,
+                )
+        except (AttributeError, TypeError, RuntimeError) as exc:
+            raise RuntimeError(
+                "DearCyFi requires a custom DearCyGui build with plot context-menu "
+                "support. Update DearCyGui to a build that allows Menu/MenuItem "
+                "widgets to be attached to Plot."
+            ) from exc
+
+        self._context_menu_items = {
+            "collapse": collapse_item,
+            "vectorized": vectorized_item,
+            "gaps": gaps_item,
+            "source": source_text,
+            "diagnostics": date_debug_item.parent,
+            "date_labels": date_labels_item,
+            "date_debug": date_debug_item,
+            "overlap": overlap_item,
+        }
+        self._context_menu_tooltips = {}
+        self._add_context_menu_tooltip(
+            "collapse",
+            "Remove large time gaps from the chart. Uncheck to restore the original time coordinates.",
+        )
+        self._add_context_menu_tooltip(
+            "vectorized",
+            "Choose the faster vectorized or scalar method for the next collapse. This does not change an active collapse.",
+        )
+        self._add_context_menu_tooltip(
+            "gaps",
+            "Report gaps and contiguous chunks in the selected collapse source.",
+        )
+        self._add_context_menu_tooltip(
+            "source",
+            "The registered time series currently used to detect gaps for time collapse.",
+        )
+        self._add_context_menu_tooltip(
+            "diagnostics",
+            "Open settings for date-context labels and chart-label diagnostics.",
+        )
+        self._add_context_menu_tooltip(
+            "date_labels",
+            "Add sparse date context to the chart's existing x-axis labels.",
+        )
+        self._add_context_menu_tooltip(
+            "date_debug",
+            "Show the date-context label diagnostic overlay.",
+        )
+        self._add_context_menu_tooltip(
+            "overlap",
+            "Show detected x-axis label extents and overlaps.",
+        )
+        self._sync_context_menu_state()
+
+    def _add_context_menu_tooltip(self, item_name: str, message: str) -> None:
+        target = self._context_menu_items[item_name]
+        with dcg.Tooltip(
+            self.context,
+            target=target,
+            parent=self.parent,
+        ) as tooltip:
+            dcg.Text(self.context, value=message)
+        self._context_menu_tooltips[item_name] = tooltip
+
+    # DearCyGui only forwards required positional callback arguments.
+    def _on_collapse_menu_action(self, _sender, _target, checked: bool) -> None:
+        if self._context_menu_syncing:
+            return
+        if checked:
+            if self._vectorized_collapse:
+                self.collapse_time_chart_vec(debug=True)
+            else:
+                self.collapse_time_chart(debug=True)
+        else:
+            self.restore_time_chart()
+        self._sync_context_menu_state()
+
+    def _on_vectorized_menu_action(self, _sender, _target, checked: bool) -> None:
+        if self._context_menu_syncing:
+            return
+        self.vectorized_collapse = checked
+
+    def _on_date_labels_menu_action(self, _sender, _target, checked: bool) -> None:
+        if not self._context_menu_syncing:
+            self.apply_date_context_labels = checked
+
+    def _on_date_debug_menu_action(self, _sender, _target, checked: bool) -> None:
+        if not self._context_menu_syncing:
+            self.date_context_debug = checked
+
+    def _on_overlap_debug_menu_action(self, _sender, _target, checked: bool) -> None:
+        if not self._context_menu_syncing:
+            self.label_overlap_debug = checked
+
+    def _sync_context_menu_state(self) -> None:
+        if not getattr(self, "_context_menu_items", None):
+            return
+        self._context_menu_syncing = True
+        try:
+            self._context_menu_items["collapse"].value = self.time_is_collapsed
+            self._context_menu_items["vectorized"].value = self._vectorized_collapse
+            self._context_menu_items["source"].value = (
+                f"Collapse source: {self._collapse_source_id or 'not selected'}"
+            )
+            self._context_menu_items["date_labels"].value = bool(
+                self.apply_date_context_labels
+            )
+            self._context_menu_items["date_debug"].value = bool(
+                self.date_context_debug
+            )
+            self._context_menu_items["overlap"].value = bool(
+                self.label_overlap_debug
+            )
+        finally:
+            self._context_menu_syncing = False
 
     def _install_cursor_tag_handlers(self) -> None:
         if self._cursor_tag_handlers_installed:
@@ -504,6 +699,7 @@ class DearCyFi(dcg.Plot):
             return
         self.restore_time_chart()
         self._collapse_source_id = series_id
+        self._sync_context_menu_state()
 
     def register_time_series(
         self,
@@ -556,6 +752,7 @@ class DearCyFi(dcg.Plot):
         self._time_series_sorted[series_id] = bool(
             source_dates.size < 2 or np.all(np.diff(source_dates) >= 0)
         )
+        self._sync_context_menu_state()
 
     @property
     def indicator_manager(self):
@@ -1202,6 +1399,7 @@ class DearCyFi(dcg.Plot):
         self._stream_cadences.pop(series_id, None)
         if was_source:
             self._collapse_source_id = None
+        self._sync_context_menu_state()
 
     def restore_time_chart(self) -> None:
         for registration in self._time_series.values():
@@ -1230,6 +1428,7 @@ class DearCyFi(dcg.Plot):
         if self._last_axis_resize_info is not None:
             self.axes_resize_callback(None, None, [self._last_axis_resize_info])
         self.context.viewport.wake(full_refresh=True)
+        self._sync_context_menu_state()
 
     @staticmethod
     def _format_spec_to_dict(spec) -> dict[str, object]:
@@ -1270,6 +1469,7 @@ class DearCyFi(dcg.Plot):
     def apply_date_context_labels(self, value: bool) -> None:
         self._apply_date_context_labels = bool(value)
         self.X1.fit()
+        self._sync_context_menu_state()
 
     @property
     def label_overlap_debug(self) -> bool:
@@ -1290,6 +1490,7 @@ class DearCyFi(dcg.Plot):
             self._diag_overlaps_series.show = value
         # Trigger a resize callback so diagnostic data is computed immediately
         self.X1.fit()
+        self._sync_context_menu_state()
 
     @property
     def boundary_tick_debug(self) -> bool:
@@ -1316,6 +1517,7 @@ class DearCyFi(dcg.Plot):
         if self._diag_date_context_series is not None:
             self._diag_date_context_series.show = value
         self.X1.fit()
+        self._sync_context_menu_state()
 
     def _format_debug_text(self) -> str:
         """Build a compact multiline debug string from the last resize info and tick counts."""
@@ -1617,6 +1819,7 @@ class DearCyFi(dcg.Plot):
             self._collapse_source_id = "candles"
         self._gap_manager.reset(self.dates)
         self._refresh_registered_tools()
+        self._sync_context_menu_state()
 
         self._apply_custom_x_labels(
             [str(i) for i in self.index],
@@ -1642,9 +1845,11 @@ class DearCyFi(dcg.Plot):
     def _collapse_registered_series(self, *, debug: bool, vectorized: bool) -> None:
         if self._gap_manager.time_is_collapsed:
             self._set_status("Time is already collapsed. Reload data to collapse again.")
+            self._sync_context_menu_state()
             return
         if self._collapse_source_id is None:
             self._set_status("Select a collapse source before collapsing time.")
+            self._sync_context_menu_state()
             return
 
         start_time = time.time()
@@ -1656,14 +1861,22 @@ class DearCyFi(dcg.Plot):
             else self._gap_manager.collapse_dates
         )
         base_step = self._stream_cadences.get(self._collapse_source_id)
-        collapse_method(
-            source_dates,
-            use_local_time=self._time_locator_use_local_time,
-            debug=debug,
-            base_step=base_step,
-        )
+        try:
+            collapse_method(
+                source_dates,
+                use_local_time=self._time_locator_use_local_time,
+                debug=debug,
+                base_step=base_step,
+            )
+        except Exception as exc:
+            self.restore_time_chart()
+            self._set_status(f"Time collapse failed: {exc}")
+            self._sync_context_menu_state()
+            raise
         if self._gap_manager.time_map is None:
+            self.restore_time_chart()
             self._set_status("Could not build a time-collapse map from the selected source.")
+            self._sync_context_menu_state()
             return
 
         projections = {
@@ -1694,6 +1907,7 @@ class DearCyFi(dcg.Plot):
             status_msg = f"{status_msg}\n\n{dump_text}"
         self._set_status(status_msg)
         self.context.viewport.wake(full_refresh=True)
+        self._sync_context_menu_state()
 
     def collapse_time_chart_vec(self, sender=None, app_data=None, user_data=None, *, debug: bool = True) -> None:
         self._collapse_registered_series(debug=debug, vectorized=True)

@@ -1,21 +1,21 @@
 ## 1. Implementation
 
-- [ ] 1.1 Require the custom DearCyGui plot context-menu capability with a clear
+- [x] 1.1 Require the custom DearCyGui plot context-menu capability with a clear
   error for unsupported builds.
-- [ ] 1.2 Add chart-owned collapse, vectorized-method, gap-report, source
+- [x] 1.2 Add chart-owned collapse, vectorized-method, gap-report, source
   status, and diagnostics menu controls using the existing chart methods and
   properties.
-- [ ] 1.3 Synchronize checkmarks and source status with chart state after menu
+- [x] 1.3 Synchronize checkmarks and source status with chart state after menu
   and direct API actions, source changes, data replacement, and failed collapse.
-- [ ] 1.4 Move the demo's bar-loading button and mode selector to `Fake Candle
+- [x] 1.4 Move the demo's bar-loading button and mode selector to `Fake Candle
   Controls`, and remove the emptied `Collapsing Controls` section while
   retaining existing programmatic APIs.
-- [ ] 1.5 Document the menu, method-selection behavior, status callback, and
+- [x] 1.5 Document the menu, method-selection behavior, status callback, and
   custom DearCyGui requirement.
 
 ## 2. Validation
 
-- [ ] 2.1 Add focused tests for both collapse methods, restoration, method
+- [x] 2.1 Add focused tests for both collapse methods, restoration, method
   changes while collapsed, diagnostics, synchronization, failed collapse, and
   the relocated bar-loading controls.
 - [ ] 2.2 Run targeted tests with the installed custom DearCyGui wheel.

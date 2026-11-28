@@ -63,3 +63,15 @@ def test_synthetic_stream_gap_is_applied_to_the_next_append_once():
 def test_synthetic_stream_rejects_invalid_interval(interval):
     with pytest.raises(ValueError, match="interval"):
         SyntheticCandleStream(interval=interval, seed=1)
+
+
+def test_demo_moves_bar_loading_controls_and_removes_collapsing_section():
+    demo_path = Path(__file__).parents[1] / "examples" / "DearCyFi_Demo" / "DearCyFi_Demo.py"
+    source = demo_path.read_text(encoding="utf-8")
+    fake_section = source.split('label="Fake Candle Controls"', 1)[1].split(
+        'label="Data Tree"', 1
+    )[0]
+
+    assert 'label="Load Bar Data"' in fake_section
+    assert 'value="Bar Length Mode:"' in fake_section
+    assert 'label="Collapsing Controls"' not in source

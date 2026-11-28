@@ -185,6 +185,28 @@ timestamp after the gap or `in_gap="previous"` to snap to the last timestamp
 before it. Use `restore_time_chart()` to restore all registrations. Removing an
 active source also restores the remaining series and clears the selection.
 
+## Plot Context Menu
+
+`DearCyFi` requires a custom DearCyGui build that supports widgets attached to
+the native plot context menu. Unsupported builds raise a compatibility error
+when a chart is constructed.
+
+Right-click the chart to:
+
+- toggle `Collapse Time`;
+- choose `Vectorized Collapse` for the next collapse (it is selected by
+  default);
+- inspect `Gaps n' Chunks`;
+- see the current `Collapse source`; and
+- open `Diagnostics` for date-context labels and diagnostics.
+
+Hover over a menu entry to see a short explanation of its effect.
+Changing the vectorized method while collapsed does not reproject the active
+chart; it affects the next collapse only. Menu checkmarks follow direct API
+calls, source changes, data replacement, restoration, and collapse failures.
+Gap reports and programmatic collapse actions use the chart's `on_status`
+callback.
+
 ## Incremental Streaming
 
 Streaming is synchronous and provider-neutral. Bulk-load a series first; each
