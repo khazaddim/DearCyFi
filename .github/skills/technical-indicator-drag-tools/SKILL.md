@@ -377,6 +377,8 @@ When adapting this example into production code, keep the interaction architectu
 
 ## Lessons From Production RangeBoxTool
 
+For persisted drawings, follow the [chart persistence skill](../chart-persistence/SKILL.md); store canonical source-time geometry, not rendered handles or drag state.
+
 The first package-owned `RangeBoxTool` in `src/dearcyfi/range_box_tools.py` exposed a few production concerns that are not obvious from `draw_draggable.py` or the early PoC alone.
 
 Archived OpenSpec reference:

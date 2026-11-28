@@ -4,7 +4,12 @@
 
 `DearCyFi` owns candles and horizontal bars, the time-series registry and collapse map, the candle indicator manager, and a registry of interactive tools. Registered `PlotEconometricSeries` instances already retain source timestamps separately from their projected dates. A range box has source geometry distinct from rendered geometry. The demo owns providers, stream tasks, and per-series legend widgets. A snapshot should use these ownership boundaries rather than walk the DearCyGui widget tree.
 
-The existing plot context menu is the shared UI entry point. The custom DearCyGui plot-item API distinguishes `enabled` (the native legend toggle) from `show` (which also removes the legend entry); restoring one is not a substitute for restoring the other.
+The existing plot context menu is the shared UI entry point. Version 1 does not save per-item `show` or native legend `enabled`. Reconstructed items start visible without requiring any new DearCyGui capability.
+
+In the DearCyGui build tested with DearCyFi, clicking a legend entry for a
+`DrawInPlot` item hides its drawing children, but its public `enabled` property
+does not reflect the change. DearCyFi does not infer that hidden state or patch
+the dependency to persist it.
 
 ## Decisions
 
@@ -25,7 +30,7 @@ Use stable kind tokens such as `candles`, `econometric`, `horizontal-bars`, `sma
 - Econometric series store source timestamp and value columns at their own cadence, with their gap-following policy. Do not infer cadence from candles, fill gaps, drop observations, or store the projected X array. Horizontal bars use their actual lengths and price levels and data/normalized presentation, not a random seed or source-time projection.
 - Indicator definitions are authoritative. Reuse the indicator registry and manager to validate and compute outputs from the restored candles, including SMA warm-up. An SMA defined on an empty chart may remain empty until candles are loaded. Do not write calculated values or make EMA/RSI depend on SMA's parameter names.
 - Restore range-box coordinates, axis, colors, hit size, minimum size, and tooltip options using the existing tool lifecycle. Geometry is canonical source time and Y values; never save drag-start copies, hit regions, or hover state. Future drawings can define their own semantic anchors and typed geometry.
-- Use explicit allowlists per kind for presentation: labels, symbolic Y axes, RGBA colors, relevant line/marker/candle/bar styles, tooltip switches, and plot item `show`, `enabled`, `no_legend`, and `ignore_fit` where supported. Do not dump `**kwargs`, runtime state, custom formatters, themes, or fonts. Restore standard formatters; host callbacks and custom decorations can be attached again by the host. Other unregistered host-owned plot children are outside the format and are not deleted by Open.
+- Use explicit allowlists per kind for presentation: labels, symbolic Y axes, RGBA colors, relevant line/marker/candle/bar styles, tooltip switches, and plot item `no_legend` and `ignore_fit` where supported. Do not dump `**kwargs`, runtime state, custom formatters, themes, or fonts. Restore standard formatters; host callbacks and custom decorations can be attached again by the host. Other unregistered host-owned plot children are outside the format and are not deleted by Open.
 
 Use Unix seconds in UTC for source timestamps and drawing anchor times. Display date mode (local/UTC, 12/24 hour, ISO, date-context labels) is separate; local mode uses the destination machine's timezone. Use finite JSON numbers for coordinates and options. In supported sample-value columns that can contain missing observations, encode a missing value as `null` and decode it to the built-in type's missing representation; an econometric `null` restores a line break. Infinity is not missing. Validate values and timestamp ordering using each built-in's data contract; do not silently sort, deduplicate, or coerce input. Reject JSON `NaN`/`Infinity`, duplicate object keys, and nonrepresentable numeric values.
 
@@ -58,3 +63,40 @@ Add **Save Chart...** and **Open Chart...** without replacing the native menu or
 - Embedded JSON is readable, portable, and offline, but larger than binary or provider references. Version 1 is a bounded snapshot, not storage for unlimited historical feeds.
 - Reconstructing instances preserves logical IDs, not Python/GUI object identities. A host holding a reference to a replaced series must reacquire it after Open. Arbitrary host-owned overlays remain the host's responsibility.
 - Treat opening as replacement, not merge. A successful Open replaces supported chart contents absent from the document as well as those present; an empty valid snapshot clears them. There is no undo, automatic backup, or app-wide workspace persistence in this change.
+
+## Version 1 Field Reference
+
+- `chart.axes`: `X1`, `Y1`, `Y2`, `Y3` each contain `enabled`, `label`,
+  `scale` (`LINEAR`, `TIME`, `LOG10`, `SYMLOG`), `invert`, `opposite`, and
+  `range` (two increasing finite bounds, or `null`). X1 also contains `space`
+  (`source` or `collapsed`). An unset range fits independently on Open.
+- `chart.legend`: `show`, `location` (symbolic DearCyGui location), `horizontal`,
+  `outside`, `no_buttons`, `no_highlight_item`, `no_highlight_axis`, `no_menus`,
+  and `sorted`. `chart.anchor_tooltips_enabled` controls drawing anchor tooltips.
+- `chart.time`: `source` (registered ID or `null`), `vectorized` (next-collapse
+  preference), `active_method` (`scalar`, `vectorized`, or `null`), `gaps`
+  (`null` in source time; otherwise `[left_source, right_source, retained_width]`
+  rows), `stream_interval` (selected source cadence or `null`), `use_local_time`,
+  `use_24_hour`, `use_iso8601`, and `date_context_labels`.
+- Candle `data`: `dates`, `open`, `high`, `low`, `close`, `volume`, `index`,
+  `time_counts`. `volume`, `index`, and `time_counts` may be `null` as whole
+  columns. An index is a JSON-scalar array; time counts are arrays of up to
+  three integers per candle. The candle ID is always `candles`.
+- Econometric `data`: `dates` and `values`; preserve array order and `null`
+  values without changing timestamps. Time-series records carry `in_gap`
+  (`next` or `previous`). Source-series timestamps are supported from 1970
+  through the start of 3000.
+- Horizontal-bar `data`: `lengths` and `levels`; at most one such overlay.
+- Plot item `display`: `label`, `y_axis` (`Y1`/`Y2`/`Y3`), `no_legend`,
+  `ignore_fit`. Candle display adds `bull_color`, `bear_color`,
+  `weight`, `tooltip`, `count_position`, `count_offset`, and `volume`. Bar
+  display adds `colors`, `line_colors`, `weight`, `anchor`, `anchor_value`,
+  `value_space`, and `normalized_max_fraction`. Volume inherits the candle
+  axis, adds `auto_weight`, and uses `colors: null` for candle-direction colors.
+  Econometric and SMA displays add `line_color`, `line_thickness`, `markers`,
+  `marker_color`, `marker_radius`, and `tooltip`. Color channels use 0–255.
+- SMA `parameters`: `period` (positive integer) and `field` (`open`, `high`,
+  `low`, `close`). Input is `candles`; the registration ID is `indicator:<id>`.
+- Range-box `options`: `hit_size`, `min_source_width`, `min_source_height`,
+  and `anchor_tooltips_enabled`. Its `display` has `y_axis`, `line_color`,
+  `fill_color`, and the `hover_` and `active_` variants of both colors.

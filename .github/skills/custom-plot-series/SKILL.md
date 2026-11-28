@@ -140,4 +140,6 @@ Rendered probes for legend toggle, fit, and tooltips — write a temporary scrip
 
 ## Process
 
+For series that participate in chart snapshots, follow the [chart persistence skill](../chart-persistence/SKILL.md) before adding or changing their record kind.
+
 Composite series changes are usually architectural or breaking: follow `openspec/AGENTS.md` (proposal → approval → implement → check off `tasks.md` → `openspec validate <change> --strict --no-interactive`). Update the README series section with options, units, defaults, and migration notes.

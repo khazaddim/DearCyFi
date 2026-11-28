@@ -222,7 +222,8 @@ Right-click the chart to:
   default);
 - inspect `Gaps n' Chunks`;
 - see the current `Collapse source`; and
-- open `Diagnostics` for date-context labels and diagnostics.
+- open `Diagnostics` for date-context labels and diagnostics;
+- use `Save Chart...` and `Open Chart...` for portable snapshots.
 
 Hover over a menu entry to see a short explanation of its effect.
 Changing the vectorized method while collapsed does not reproject the active
@@ -230,6 +231,74 @@ chart; it affects the next collapse only. Menu checkmarks follow direct API
 calls, source changes, data replacement, restoration, and collapse failures.
 Gap reports and programmatic collapse actions use the chart's `on_status`
 callback.
+
+## Chart Snapshots
+
+Right-click a DearCyFi chart, choose **Save Chart...**, and enter a local path.
+The dialog adds `.json` when the path has no suffix and asks before overwriting
+an existing file. **Open Chart...** asks before replacing that chart. Cancel
+before publication to leave the chart and file unchanged. Errors leave the dialog
+open so you can correct the path or retry.
+
+**Version 1 limitation: hidden series reopen visible.** Save includes the data
+for hidden series but does not remember which ones were hidden, whether by a
+legend click or by application code. You can hide them again after opening.
+Axis enablement and legend configuration are still restored.
+
+```python
+snapshot = chart.capture_chart_state()       # detached, JSON-compatible dictionary
+chart.save_chart("my-chart.json")             # refuses an existing path
+chart.save_chart("my-chart.json", overwrite=True)
+
+other_chart.open_chart("my-chart.json")       # replaces managed contents in place
+other_chart.restore_chart_state(snapshot)     # equivalent, without a file
+line = other_chart.get_time_series("my-series-id")  # get the replacement instance
+```
+
+Invoke the programmatic methods on the same mutation boundary as your chart
+updates (for example, the DearCyGui callback queue or the application's event
+loop). The programmatic path APIs use the exact supplied path and do not prompt.
+You can set `chart.on_chart_restored` to a callback that receives the chart after
+a successful replacement, so your application can rebind controls and stop
+stale producers. Validation raises `ChartPersistenceError` (a `ValueError`);
+file access and overwrite errors raise `OSError` subclasses.
+
+A version 1 file is a strict UTF-8 JSON object with `format: "dearcyfi-chart"`,
+`version: 1`, `chart`, and ordered `series`, `indicators`, and `drawings` arrays.
+It is limited to **64 MiB**, including JSON syntax and whitespace. Each item has
+a stable `id` and `kind`; see the
+[field reference](openspec/changes/add-chart-persistence/design.md#version-1-field-reference)
+for the exact keys. The supported kinds are:
+
+| Kind | Stored data and presentation |
+| --- | --- |
+| `candles` | Source OHLCV, explicit JSON-scalar index (or generated index), optional time counts, candle colors/weight/tooltip, and separate volume bar display |
+| `econometric` | Registered scalar observations in source order, `next`/`previous` gap policy, line and marker styles, tooltip toggle |
+| `horizontal-bars` | One chart-owned overlay with lengths, price levels, fill and outline colors, weight, anchor and data/normalized mode |
+| `sma` | Candle input, period, OHLC field, and line display; values and warm-up gaps are recomputed |
+| `range-box` | Source-time bounds and Y values, axis, colors, hit size, minimum size and anchor-tooltip options; handles are recreated |
+
+Source dates and drawing anchor times are Unix seconds in UTC; version 1 source
+series dates use the supported ImPlot time range (1970 through the start of
+3000). Candle dates are strictly increasing. A missing econometric value or
+volume sample is `null`, not `NaN`; missing OHLC values are not supported. The
+chart section includes X1/Y1/Y2/Y3 settings and initialized limits, legend and
+anchor-tooltip settings, and date options. It retains the collapse source,
+preferred method, active gap definitions, and the rendered X1 limits, even when
+a limit is inside a retained gap.
+
+Open replaces the managed contents rather than merging; an empty snapshot
+clears them. Unregistered host-owned plot children, other plots, provider
+controls, callbacks, themes, custom formatters, and live connections are not
+serialized; callbacks and custom decorations for replaced items can be attached
+again by the host. Transient diagnostics are cleared on Open.
+Unknown fields, kinds, or versions are rejected rather than
+partially loaded. New explicitly supported kinds can use the same envelope;
+incompatible schema changes need a new version or an explicit migration.
+
+Snapshots contain **the actual source data**, not a reference to a provider.
+They are local, unencrypted files. Before sharing one, check that its market
+data, labels, and annotations can be disclosed or redistributed.
 
 ## Incremental Streaming
 

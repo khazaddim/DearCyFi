@@ -7,6 +7,7 @@ import dearcygui as dcg
 import pytest
 
 from dearcyfi import DearCyFi, PlotEconometricSeries
+from dearcyfi import _chart_state
 
 
 @pytest.fixture
@@ -136,3 +137,79 @@ def test_sma_buttons_act_on_the_selected_indicator(demo_class, capsys):
     assert third.registration_id in demo.DCF_plot.time_series_ids
     assert second.series not in demo.DCF_plot.children
     assert second.series.uuid not in demo._legend_test_series
+
+
+def test_snapshot_open_only_interrupts_demo_producers_on_success(demo_class, monkeypatch, tmp_path):
+    demo = demo_class.__new__(demo_class)
+    demo.C = dcg.Context()
+    demo._legend_test_series = {}
+    demo._indicator_edit_popups = {}
+    demo._stream_shutdown_task = None
+    demo._stream_gap_next = True
+    demo._stream_feed = object()
+    demo.set_status = lambda _message: None
+    with dcg.Window(demo.C):
+        demo.DCF_plot = DearCyFi(demo.C, prewarm=False, on_chart_restored=demo._on_chart_restored)
+        demo.orig_plot = dcg.Plot(demo.C)
+        demo.orig_candlestick = dcg.PlotLine(demo.C, parent=demo.orig_plot, X=[1], Y=[2])
+        demo.stream_status = dcg.Text(demo.C)
+        demo.stream_gap_checkbox = dcg.Checkbox(demo.C, value=True)
+        demo.indicator_status = dcg.Text(demo.C)
+    series = PlotEconometricSeries(demo.C, parent=demo.DCF_plot, dates=[100, 200], values=[1, 2])
+    demo.econometric_series = series
+    demo.DCF_plot.register_time_series("toy-econometric", series)
+    instance = demo.DCF_plot.create_indicator(instance_id="sma", period=2)
+    demo._attach_indicator_menu(instance.series)
+    demo._attach_legend_test_menu(instance.series)
+    demo._attach_legend_test_menu(demo.orig_candlestick)
+    edit = next(child for child in instance.series.children if getattr(child, "label", "") == "Edit indicator")
+    demo._open_indicator_edit_popup(edit)
+    stale_popup = demo._indicator_edit_popups["sma"]
+    path = tmp_path / "demo.json"
+    demo.DCF_plot.save_chart(path)
+
+    async def run():
+        demo._stream_task = asyncio.create_task(asyncio.sleep(100))
+        demo._reload_task = asyncio.create_task(asyncio.sleep(100))
+        stream, reload = demo._stream_task, demo._reload_task
+        try:
+            menu = demo.DCF_plot._chart_file_menu
+            menu.show(save=False)
+            menu.path_input.value = str(path)
+            menu._submit()
+            menu._cancel()
+            assert demo._stream_task is stream and not stream.cancelling()
+            assert not reload.cancelling()
+            publish_view = _chart_state._publish_view
+
+            def fail(*args):
+                publish_view(*args)
+                raise RuntimeError("publish failed")
+
+            with monkeypatch.context() as patch:
+                patch.setattr(_chart_state, "_publish_view", fail)
+                with pytest.raises(RuntimeError, match="publish failed"):
+                    demo.DCF_plot.open_chart(path)
+            assert demo._stream_task is stream and not stream.cancelling()
+            assert demo.econometric_series is series
+            assert demo._indicator_edit_popups["sma"] is stale_popup
+
+            demo.DCF_plot.open_chart(path)
+            assert demo._stream_task is None and stream.cancelling()
+            assert reload.cancelling() and demo._stream_feed is None
+            assert not demo._indicator_edit_popups and stale_popup.parent is None
+            assert demo.econometric_series is demo.DCF_plot.get_time_series("toy-econometric")
+            assert demo.econometric_series is not series
+            restored = demo.DCF_plot.indicator_manager.get("sma").series
+            assert any(getattr(child, "label", "") == "Edit indicator" for child in restored.children)
+            assert instance.series.uuid not in demo._legend_test_series
+            assert demo.orig_plot.children == [demo.orig_candlestick]
+        finally:
+            await demo._shutdown_stream()
+
+    loop = asyncio.new_event_loop()
+    try:
+        monkeypatch.setitem(demo_class._stop_candle_stream.__globals__, "loop", loop)
+        loop.run_until_complete(run())
+    finally:
+        loop.close()

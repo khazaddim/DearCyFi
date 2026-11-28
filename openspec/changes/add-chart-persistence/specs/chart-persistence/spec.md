@@ -43,7 +43,7 @@ DearCyFi SHALL restore supported indicators and drawings using stable instance I
 
 ### Requirement: Restore Chart View and Time State
 
-DearCyFi SHALL restore supported X1 and Y1/Y2/Y3 axis settings and initialized visible ranges, per-series axes and visibility, chart and item legend settings, and supported chart date presentation. It SHALL distinguish native legend-disabled items from items hidden entirely. It SHALL restore the selected collapse source, the next-collapse method preference, and the active time state; a collapsed snapshot SHALL recreate the active gap mapping, including incrementally extended gaps, from validated saved gap definitions. An unset range SHALL use normal initialization for that axis rather than overwrite initialized saved ranges.
+DearCyFi SHALL restore supported X1 and Y1/Y2/Y3 axis settings and initialized visible ranges, per-series axes, chart and item legend configuration, and supported chart date presentation. Reconstructed plot items SHALL start shown and enabled; the snapshot SHALL NOT store per-item hide/show state. It SHALL restore the selected collapse source, the next-collapse method preference, and the active time state; a collapsed snapshot SHALL recreate the active gap mapping, including incrementally extended gaps, from validated saved gap definitions. An unset range SHALL use normal initialization for that axis rather than overwrite initialized saved ranges.
 
 #### Scenario: Restore a zoomed, collapsed chart after streaming
 - **WHEN** the saved chart is zoomed into a collapsed view after a gapped append, with an X1 range edge inside a retained gap
@@ -51,9 +51,10 @@ DearCyFi SHALL restore supported X1 and Y1/Y2/Y3 axis settings and initialized v
 - **AND** the collapse checkmark and source label reflect the restored state
 - **AND** disabling collapse returns series to their original timestamps
 
-#### Scenario: Preserve native legend visibility
+#### Scenario: Reopen saved series visible
 - **WHEN** one saved item was disabled by clicking its legend entry and a second item was fully hidden
-- **THEN** the first item reopens disabled but can still be toggled from the legend, and the second remains hidden including its legend entry
+- **THEN** both reopen shown and enabled
+- **AND** items with legend entries can still be toggled from the legend
 
 ### Requirement: Validate Snapshots Before Replacement
 

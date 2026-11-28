@@ -227,10 +227,17 @@ class GapCollapsedTimeMap:
         if not np.isfinite(base_step) or base_step <= 0:
             raise ValueError("base_step must be a finite positive interval")
 
-        gap_indices = _gap_indices(times, base_step)
+        definitions = (
+            (float(times[i]), float(times[i + 1]), base_step)
+            for i in _gap_indices(times, base_step)
+        )
+        return GapCollapsedTimeMap.from_gap_definitions(
+            times, definitions, use_local_time=use_local_time,
+        )
 
-        # Build segments that mirror the collapse behavior, but remove only
-        # (gap_delta - base_step) so we preserve one "normal" interval.
+    @staticmethod
+    def from_gap_definitions(times, definitions, *, use_local_time: bool) -> "GapCollapsedTimeMap":
+        """Build a map from ordered samples and validated (start, stop, retained) gaps."""
         segments: list[_TimeSegment] = []
         cumulative_removed = 0.0
         seg_real_start = float(times[0])
@@ -249,10 +256,8 @@ class GapCollapsedTimeMap:
                 )
             )
 
-        for gap_index in gap_indices:
-            g_start = float(times[gap_index])
-            g_stop = float(times[gap_index + 1])
-            remove = max(0.0, g_stop - g_start - base_step)
+        for g_start, g_stop, retained in definitions:
+            remove = max(0.0, g_stop - g_start - retained)
 
             # Segment ends at the last sample before the gap.
             _append_segment(seg_real_start, g_start, cumulative_removed)
@@ -292,6 +297,13 @@ class GapCollapsedTimeMap:
             month_starts_real=np.asarray(month_starts, dtype=float),
             year_starts_real=np.asarray(year_starts, dtype=float),
         )
+
+    def gap_definitions(self) -> list[list[float]]:
+        """Return source boundaries and rendered widths from the active map."""
+        return [
+            [left.real_end, right.real_start, right.collapsed_start - left.collapsed_end]
+            for left, right in zip(self._segments, self._segments[1:])
+        ]
 
     def project_tail_append(
         self,
@@ -549,6 +561,7 @@ class GapCollapseManager:
     def __init__(self) -> None:
         self.time_is_collapsed = False
         self.time_map: GapCollapsedTimeMap | None = None
+        self.active_method: str | None = None
         self.dates_real: np.ndarray | None = None
         self.stream_source_id: str | None = None
         self.stream_interval: float | None = None
@@ -566,6 +579,7 @@ class GapCollapseManager:
         self.dates_real = None if dates is None else np.array(dates, copy=True, dtype=float)
         self.time_is_collapsed = False
         self.time_map = None
+        self.active_method = None
         self.stream_source_id = None
         self.stream_interval = None
 
@@ -712,11 +726,13 @@ class GapCollapseManager:
                 base_step=base_step,
             )
             self.time_is_collapsed = True
+            self.active_method = "scalar"
         except Exception as exc:
             if debug:
                 print(f"[GapCollapseManager] Failed to build time map: {exc}")
             self.time_map = None
             self.time_is_collapsed = False
+            self.active_method = None
 
         return collapsed_dates
 
@@ -767,10 +783,12 @@ class GapCollapseManager:
                 base_step=base_step,
             )
             self.time_is_collapsed = True
+            self.active_method = "vectorized"
         except Exception as exc:
             if debug:
                 print(f"[GapCollapseManager] Failed to build time map: {exc}")
             self.time_map = None
             self.time_is_collapsed = False
+            self.active_method = None
 
         return collapsed_dates

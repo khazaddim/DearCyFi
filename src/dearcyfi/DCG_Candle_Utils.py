@@ -383,7 +383,8 @@ class PlotCandleStick(dcg.DrawInPlot):
 
         This prevents duplicate OHLC rows during rare duplicate GotHover bursts.
         """
-        if not self._tooltip:
+        plot = self.parent
+        if not self._tooltip or plot is None or plot.parent is None:
             return
         if target is self._active_tooltip_target and self._active_tooltip is not None:
             return
@@ -393,7 +394,7 @@ class PlotCandleStick(dcg.DrawInPlot):
         target.handlers = list(target.handlers) + [condition]
         with dcg.Tooltip(self.context, target=target,
                          condition_from_handler=condition,
-                         parent=self.parent.parent) as tooltip:
+                         parent=plot.parent) as tooltip:
             dcg.Text(self.context, value=f"Date: {self._time_formatter(data[0])}")
             dcg.Text(self.context, value=f"Open: {data[1]:.2f}")
             dcg.Text(self.context, value=f"Close: {data[2]:.2f}")

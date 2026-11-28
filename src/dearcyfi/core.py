@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from os import PathLike
 from pathlib import Path
 
 import dearcygui as dcg
@@ -10,6 +11,7 @@ import numpy as np
 
 from .PyTimeLocator import locator_time3
 from .DCG_Candle_Utils import PlotCandleStick
+from ._chart_document import ChartDocument, read_document, validate_document, write_document
 from .candle_utils.gap_utils import GapCollapseManager
 from .candle_indicators import CandleIndicatorManager
 from .range_box_tools import AnchorTooltipCoordinator, InteractiveTool, RangeBoxDiagnosticSnapshot, RangeBoxGeometry, RangeBoxTool
@@ -82,6 +84,8 @@ class _CandleSeriesAdapter:
 
     def prepare_append(self, timestamp: float, values: dict[str, object]) -> dict[str, object]:
         prepared = self.capture()
+        if not len(prepared["volumes"]):
+            prepared["volumes"] = np.zeros_like(prepared["source_dates"])
         prepared["source_dates"] = np.append(prepared["source_dates"], timestamp)
         prepared["dates"] = np.append(prepared["dates"], timestamp)
         for field, value_name in (
@@ -98,6 +102,8 @@ class _CandleSeriesAdapter:
 
     def prepare_update(self, values: dict[str, object]) -> dict[str, object]:
         prepared = self.capture()
+        if "volume" in values and not len(prepared["volumes"]):
+            prepared["volumes"] = np.zeros_like(prepared["source_dates"])
         for field, value in values.items():
             array_name = "volumes" if field == "volume" else field + "s"
             prepared[array_name][-1] = float(value)
@@ -157,6 +163,7 @@ class DearCyFi(dcg.Plot):
         context: dcg.Context,
         *,
         on_status=None,
+        on_chart_restored: Callable[["DearCyFi"], None] | None = None,
         collapsed_time_cursor_tag: bool = True,
         cursor_tag_formatter: locator_time3.DateTimeSpec | Callable[[float], str] | None = None,
         cursor_tag_bullish_color=(0, 255, 0, 255),
@@ -172,6 +179,7 @@ class DearCyFi(dcg.Plot):
         prewarm: bool = True,
         apply_date_context_labels: bool = True,
         inject_boundary_ticks: bool | None = None,
+        _snapshot_staging: bool = False,
         **plot_kwargs,
     ) -> None:
         super().__init__(context, **plot_kwargs)
@@ -179,8 +187,10 @@ class DearCyFi(dcg.Plot):
         # since the plot needs to know the theme for its time locator font loading logic.
 
         self._on_status = on_status
+        self.on_chart_restored = on_chart_restored
 
-        print('loaded version with date context labels')
+        if not _snapshot_staging:
+            print('loaded version with date context labels')
 
         self._time_locator_use_local_time = use_local_time
         self._time_locator_use_24_hour = use_24_hour
@@ -207,7 +217,8 @@ class DearCyFi(dcg.Plot):
                     self._time_locator_font_path,
                     self._time_locator_font_size_px,
                 )
-                print(f"[DearCyFi] PIL text measurer enabled: {self._time_locator_font_path}")
+                if not _snapshot_staging:
+                    print(f"[DearCyFi] PIL text measurer enabled: {self._time_locator_font_path}")
             except Exception as exc:
                 print(f"[DearCyFi] PIL measurer unavailable, falling back to char_px (reason: {exc})")
 
@@ -269,6 +280,7 @@ class DearCyFi(dcg.Plot):
 
         self.candlestick_plot = None
         self.horizontal_bars = None
+        self._horizontal_bars_id = "horizontal-bars"
 
         self.debug_text = dcg.SharedStr(context, value="")
         self._last_tick_counts: dict[str, int] = {}
@@ -284,16 +296,18 @@ class DearCyFi(dcg.Plot):
         self._vectorized_collapse: bool = True
         self._context_menu_items: dict[str, object] = {}
         self._context_menu_syncing: bool = False
-        self._install_context_menu()
+        if not _snapshot_staging:
+            self._install_context_menu()
 
         self.X1.label = "Date"
         self.X1.scale = dcg.AxisScale.TIME
         self.Y1.label = "Price ($)"
 
-        self.handlers += [
-            dcg.AxesResizeHandler(context, callback=self.axes_resize_callback),
-        ]
-        self.cursor_tag_enabled = collapsed_time_cursor_tag
+        if not _snapshot_staging:
+            self.handlers += [
+                dcg.AxesResizeHandler(context, callback=self.axes_resize_callback),
+            ]
+            self.cursor_tag_enabled = collapsed_time_cursor_tag
 
     @staticmethod
     def _default_cursor_tag_formatter() -> locator_time3.DateTimeSpec:
@@ -405,6 +419,17 @@ class DearCyFi(dcg.Plot):
             "date_debug": date_debug_item,
             "overlap": overlap_item,
         }
+        from ._chart_menu import ChartFileMenu
+
+        self._chart_file_menu = ChartFileMenu(self)
+        self._context_menu_items["save_chart"] = dcg.MenuItem(
+            self.context, parent=self, label="Save Chart...",
+            callback=lambda: self._chart_file_menu.show(save=True),
+        )
+        self._context_menu_items["open_chart"] = dcg.MenuItem(
+            self.context, parent=self, label="Open Chart...",
+            callback=lambda: self._chart_file_menu.show(save=False),
+        )
         self._context_menu_tooltips = {}
         self._add_context_menu_tooltip(
             "collapse",
@@ -677,6 +702,35 @@ class DearCyFi(dcg.Plot):
     def time_series_ids(self) -> tuple[str, ...]:
         return tuple(self._time_series)
 
+    def get_time_series(self, series_id: str):
+        """Return the registered series for an ID (the candle plot for 'candles')."""
+        series = self._time_series[series_id].series
+        return series.candle if isinstance(series, _CandleSeriesAdapter) else series
+
+    def capture_chart_state(self) -> ChartDocument:
+        """Return a detached v1 snapshot on the chart's mutation boundary."""
+        from ._chart_state import capture_chart
+
+        return capture_chart(self)
+
+    def restore_chart_state(self, document: ChartDocument) -> None:
+        """Validate and replace the managed contents of this chart in place."""
+        from ._chart_state import restore_validated_chart
+
+        restore_validated_chart(self, validate_document(document))
+
+    def save_chart(self, path: str | PathLike[str], *, overwrite: bool = False) -> None:
+        """Save a complete local snapshot; refuse to overwrite by default."""
+        from ._chart_state import capture_chart
+
+        write_document(path, capture_chart(self, validate=False), overwrite=overwrite)
+
+    def open_chart(self, path: str | PathLike[str]) -> None:
+        """Read a local snapshot and replace this chart without contacting a provider."""
+        from ._chart_state import restore_validated_chart
+
+        restore_validated_chart(self, read_document(path))
+
     @property
     def tools(self) -> tuple[InteractiveTool, ...]:
         return tuple(self._tools)
@@ -867,10 +921,12 @@ class DearCyFi(dcg.Plot):
 
     @staticmethod
     def _validate_candle_arrays(prepared: dict[str, object]) -> None:
-        values = [float(prepared[name][-1]) for name in ("opens", "highs", "lows", "closes", "volumes")]
-        open_value, high_value, low_value, close_value, volume_value = values
-        if not all(np.isfinite(value) for value in values):
-            raise ValueError("Candle OHLCV values must be finite")
+        values = [float(prepared[name][-1]) for name in ("opens", "highs", "lows", "closes")]
+        open_value, high_value, low_value, close_value = values
+        volume = prepared["volumes"]
+        volume_value = float(volume[-1]) if len(volume) else np.nan
+        if not all(np.isfinite(value) for value in values) or np.isinf(volume_value):
+            raise ValueError("Candle OHLC values must be finite and volume cannot be infinite")
         if volume_value < 0:
             raise ValueError("Candle volume must be non-negative")
         if not (low_value <= open_value <= high_value and low_value <= close_value <= high_value):
@@ -947,8 +1003,12 @@ class DearCyFi(dcg.Plot):
                     plotted_timestamp = new_timestamp
                 candidate_dates[series_id] = np.append(current_plot_dates, plotted_timestamp)
                 if self._gap_manager.time_is_collapsed and spacing == "gap":
+                    rebuilt_indicators = (
+                        {instance.registration_id for instance in self.indicator_instances.values()}
+                        if series_id == "candles" else set()
+                    )
                     for follower_id, follower in self._time_series.items():
-                        if follower_id == series_id:
+                        if follower_id == series_id or follower_id in rebuilt_indicators:
                             continue
                         source_dates = np.asarray(follower.series.source_dates, dtype=float)
                         old_dates = old_plot_dates.get(follower_id, source_dates)
@@ -1049,6 +1109,8 @@ class DearCyFi(dcg.Plot):
                 self.volume = np.asarray(prepared["volumes"], dtype=float).copy()
                 if new_timestamp is not None:
                     next_index = len(self.index) if self._index_is_default else new_timestamp
+                    if not self._index_is_default and all(isinstance(value, str) for value in self.index):
+                        next_index = str(new_timestamp)
                     self.index = np.append(self.index, next_index)
             if (
                 selected_source_append
@@ -1745,7 +1807,7 @@ class DearCyFi(dcg.Plot):
         self.highs = new_highs
         self.lows = new_lows
         self.closes = new_closes
-        self.index = np.asarray(index) if index is not None else np.arange(self.dates.shape[0])
+        self.index = np.asarray(index, dtype=object) if index is not None else np.arange(self.dates.shape[0])
         self._index_is_default = index is None
         self.volume = new_volume
 
@@ -1972,6 +2034,11 @@ class DearCyFi(dcg.Plot):
             X = X / maximum if maximum > 0.0 else np.zeros_like(X)
 
         if self.horizontal_bars is None:
+            bar_id = "horizontal-bars"
+            number = 2
+            while bar_id in self._time_series:
+                bar_id = f"horizontal-bars-{number}"
+                number += 1
             with self:
                 self.horizontal_bars = dcg.PlotColorBars(
                     self.context,
@@ -1987,6 +2054,7 @@ class DearCyFi(dcg.Plot):
                     ignore_fit=True,
                     axes=(dcg.Axis.X1, dcg.Axis.Y1),
                 )
+            self._horizontal_bars_id = bar_id
             self._set_status(f"Loaded {num_bars} horizontal bars")
         else:
             self.horizontal_bars.X = []

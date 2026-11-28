@@ -28,3 +28,5 @@ When designing, implementing, reviewing, or testing DearCyFi demo widgets that b
 Use that skill before adapting `examples/DearCyFi_Demo/toy_data_browser.py` into a provider widget or adding options, liquidity, or other non-candle loaders. DearCyFi does not yet provide gap-aware econometric series plotting; preserve non-candle timestamps and gaps at the adapter boundary, and do not implement that missing series capability incidentally during widget work.
 
 When designing, implementing, reviewing, or testing a new or changed DearCyFi plot series (econometric, options, overlay, or other composite series built from DearCyGui drawing primitives), or fixing a series' legend toggle, tooltip, axis fit, Y-axis, or time-collapse behavior, use `.github/skills/custom-plot-series/SKILL.md`. Use `src/dearcyfi/econometric_series.py` as the reference implementation.
+
+When adding or changing chart snapshot kinds, the v1 codec, or transactional capture and restore, use the [chart persistence skill](.github/skills/chart-persistence/SKILL.md).

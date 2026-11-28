@@ -10,6 +10,7 @@ import dearcygui as dcg
 import numpy as np
 
 from .econometric_series import DEFAULT_LINE_COLOR, PlotEconometricSeries
+from ._chart_document import indicator_registration_id
 
 
 SUPPORTED_OHLC_FIELDS = ("open", "high", "low", "close")
@@ -332,15 +333,15 @@ class PlotCandleIndicatorSeries(PlotEconometricSeries):
     ) -> None:
         line_color = validate_indicator_line_color(line_color)
         result = calculator.calculate(candles)
+        kwargs.setdefault("label", calculator.name)
+        kwargs.setdefault("markers", False)
+        kwargs.setdefault("tooltip", True)
         super().__init__(
             context,
             dates=candles.dates,
             source_dates=candles.dates,
             values=result["sma"],
-            label=calculator.name,
             y_axis=y_axis,
-            markers=False,
-            tooltip=True,
             line_color=line_color,
             **kwargs,
         )
@@ -494,7 +495,7 @@ class CandleIndicatorManager:
             highs=np.asarray(candle.highs, dtype=float),
             lows=np.asarray(candle.lows, dtype=float),
             closes=np.asarray(candle.closes, dtype=float),
-            volumes=np.asarray(candle.volumes, dtype=float),
+            volumes=np.asarray(candle.volumes, dtype=float) if len(candle.volumes) else None,
         )
 
     def create(
@@ -505,13 +506,24 @@ class CandleIndicatorManager:
         field: object = "close",
         y_axis: dcg.Axis = dcg.Axis.Y1,
         line_color=DEFAULT_LINE_COLOR,
+        instance_id: str | None = None,
         **kwargs,
     ) -> IndicatorInstance:
+        if instance_id is None:
+            while True:
+                candidate = f"indicator-{uuid.uuid4().hex}"
+                if (candidate not in self._instances
+                        and indicator_registration_id(candidate) not in self.chart.time_series_ids):
+                    instance_id = candidate
+                    break
+        if not isinstance(instance_id, str) or not instance_id:
+            raise ValueError("Indicator instance ID must be a non-empty string")
+        registration_id = indicator_registration_id(instance_id)
+        if instance_id in self._instances or registration_id in self.chart.time_series_ids:
+            raise ValueError(f"Indicator instance or registration ID already exists: {instance_id!r}")
         calculator = self.registry.create(type, period=period, field=field)
         candles = self._chart_candles()
         calculator.calculate(candles)
-        instance_id = f"indicator-{uuid.uuid4().hex}"
-        registration_id = f"indicator:{instance_id}"
         with self.chart:
             series = PlotCandleIndicatorSeries(
                 self.chart.context,
@@ -616,7 +628,7 @@ class CandleIndicatorManager:
             highs=np.asarray(prepared["highs"], dtype=float),
             lows=np.asarray(prepared["lows"], dtype=float),
             closes=np.asarray(prepared["closes"], dtype=float),
-            volumes=np.asarray(prepared["volumes"], dtype=float),
+            volumes=np.asarray(prepared["volumes"], dtype=float) if len(prepared["volumes"]) else None,
         )
         return {
             instance_id: instance.calculator.calculate(candles)
@@ -634,7 +646,7 @@ class CandleIndicatorManager:
             highs=np.asarray(prepared["highs"], dtype=float),
             lows=np.asarray(prepared["lows"], dtype=float),
             closes=np.asarray(prepared["closes"], dtype=float),
-            volumes=np.asarray(prepared["volumes"], dtype=float),
+            volumes=np.asarray(prepared["volumes"], dtype=float) if len(prepared["volumes"]) else None,
         )
         results = (
             prepared_results
@@ -656,3 +668,4 @@ class CandleIndicatorManager:
                 values=result["sma"],
                 label=instance.calculator.name,
             )
+            self.chart._plot_dates_by_id[instance.registration_id] = np.asarray(plotted, dtype=float).copy()
