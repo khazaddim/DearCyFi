@@ -185,6 +185,21 @@ timestamp after the gap or `in_gap="previous"` to snap to the last timestamp
 before it. Use `restore_time_chart()` to restore all registrations. Removing an
 active source also restores the remaining series and clears the selection.
 
+The collapsed X-axis labels and cursor tag use the same time conversion.
+Before the first source timestamp, time is unchanged. After the last source
+timestamp, the display adds back the total time removed from gaps:
+`real_time = endpoint_source_time + (x - endpoint_plot_x)`. This reverses
+follower projection there, so a tick at a registered follower observation
+displays its original time at the axis's current precision. Outside the source
+range, labels use ordinary elapsed time without inferring trading sessions,
+holidays, or gaps in unloaded data. A follower's tooltip reports the
+observation's original timestamp even when no tick lands on it. A custom
+cursor formatter receives the resolved timestamp and controls the tag text.
+
+To see this in the demo, enable **Collapse Time** and pan or zoom past each
+end of the candles. Compare the axis with a weekly liquidity marker's
+tooltip, then turn off **Collapse Time** to compare against the original timeline.
+
 ## Plot Context Menu
 
 `DearCyFi` requires a custom DearCyGui build that supports widgets attached to

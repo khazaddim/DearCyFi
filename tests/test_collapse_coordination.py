@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import dearcygui as dcg
 
-from dearcyfi import DearCyFi
+from dearcyfi import DearCyFi, PlotEconometricSeries
+from dearcyfi.PyTimeLocator import locator_time3
 
 
 class FakeSeries:
@@ -59,6 +60,50 @@ def test_selected_source_drives_follower_projection_and_restoration(chart):
     chart.restore_time_chart()
     np.testing.assert_array_equal(source.plot_dates, source.source_dates)
     np.testing.assert_array_equal(follower.plot_dates, follower.source_dates)
+
+
+@pytest.mark.parametrize("date_context", [False, True])
+def test_collapsed_axis_labels_keep_follower_dates_without_exterior_markers(
+    monkeypatch, date_context
+):
+    base = 1_704_153_600.0  # Jan 2, midnight UTC
+    chart = DearCyFi(
+        dcg.Context(), prewarm=False, use_local_time=False, use_iso8601=True,
+        apply_date_context_labels=date_context,
+    )
+    chart.set_data(
+        dates=base + np.array([0, 10, 20, 86_370, 86_380]),
+        opens=[1] * 5, highs=[2] * 5, lows=[0] * 5, closes=[1] * 5,
+    )
+    with chart:
+        follower = PlotEconometricSeries(
+            chart.context, dates=[base + 86_395, base - 20], values=[1, 2],
+        )
+    chart.register_time_series("econometric", follower)
+    chart.date_context_max_gap_px = 5
+    chart.date_context_min_spacing_px = 0
+    offsets = [-25, -20, -10, 0, 25, 40, 50, 55, 70]
+    monkeypatch.setattr(
+        locator_time3.TimeAxisLocator, "__call__",
+        lambda *_: [locator_time3.Tick(base + dx, 0, False, True, str(dx)) for dx in offsets],
+    )
+    chart.collapse_time_chart(debug=False)
+    axis_info = (base - 30, base + 80, 0.1)
+    chart.axes_resize_callback(None, None, [axis_info])
+
+    np.testing.assert_array_equal(follower.plot_dates, [base + 55, base - 20])
+    assert list(chart.X1.labels_coord) == [base + dx for dx in offsets]
+    expected = [":35", ":40", ":50", ":00", ":20", ":40", ":50", ":55", ":10"]
+    if date_context:
+        expected = [
+            "--01-01\n:35", "--01-01\n:40", "--01-01\n:50", "--01-02\n:00",
+            "--01-02\n:20", "--01-02\n:40", "--01-02\n:50", "--01-02\n:55", "--01-03\n:10",
+        ]
+    assert list(chart.X1.labels) == expected
+
+    chart.restore_time_chart()
+    assert list(chart.X1.labels_coord) == [base + dx for dx in offsets]
+    assert all(not label.startswith("~") for label in chart.X1.labels)
 
 
 @pytest.mark.parametrize("method_name", ["collapse_time_chart", "collapse_time_chart_vec"])

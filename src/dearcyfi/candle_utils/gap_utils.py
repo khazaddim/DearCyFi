@@ -457,6 +457,15 @@ class GapCollapsedTimeMap:
             x = seg.collapsed_end
         return x + seg.shift
 
+    def _expand_for_axis(self, x: float) -> float:
+        """Invert follower projection at exterior positions; keep in-range expansion."""
+        first, last = self._segments[0], self._segments[-1]
+        if x < first.collapsed_start:
+            return x + first.shift
+        if x > last.collapsed_end:
+            return x + last.shift
+        return self.expand(x)
+
     def collapse(self, real_time: float) -> float:
         """Map real unix time (seconds) to collapsed-x (only well-defined inside segments)."""
         t = float(real_time)

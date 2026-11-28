@@ -32,6 +32,17 @@ def test_project_preserves_offsets_outside_source_range(time_map):
     assert time_map.project(125.0) == 55.0
 
 
+def test_axis_inverse_preserves_exterior_offsets_without_changing_bridge_or_expand(time_map):
+    for timestamp in (-20.0, -10.0, 120.0, 125.0):
+        x = time_map.project(timestamp)
+        assert time_map._expand_for_axis(x) == timestamp
+
+    for x, timestamp in [(0.0, 0.0), (25.0, 20.0), (40.0, 110.0)]:
+        assert time_map._expand_for_axis(x) == timestamp
+    assert time_map.expand(-20.0) == 0.0
+    assert time_map.expand(55.0) == 110.0
+
+
 def test_project_many_preserves_shape_and_non_finite_values(time_map):
     values = np.array([[10.0, 50.0], [125.0, np.nan]])
     projected = time_map.project_many(values, in_gap="previous")

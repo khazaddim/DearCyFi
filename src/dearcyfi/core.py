@@ -1,3 +1,4 @@
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -585,6 +586,7 @@ class DearCyFi(dcg.Plot):
             self._on_status(str(message))
 
     def expand_cursor_plot_x_to_real_time(self, x_coord: float) -> float:
+        """Expand a plot coordinate with the boundary clamps used by drawing tools."""
         x_value = float(x_coord)
         if not np.isfinite(x_value):
             raise ValueError("cursor x coordinate must be finite")
@@ -612,12 +614,18 @@ class DearCyFi(dcg.Plot):
             raise TypeError("cursor_tag_formatter callable must return a string")
         return text
 
+    def _cursor_tag_timestamp_and_text(self, x: float) -> tuple[float, str]:
+        if not math.isfinite(x):
+            raise ValueError("cursor x coordinate must be finite")
+        timestamp = self._expand_x_axis_time(x)
+        return timestamp, self.format_cursor_timestamp(timestamp)
+
     def format_cursor_tag_text_for_plot_x(self, x_coord: float) -> str:
-        return self.format_cursor_timestamp(self.expand_cursor_plot_x_to_real_time(x_coord))
+        return self._cursor_tag_timestamp_and_text(float(x_coord))[1]
 
     def get_cursor_tag_state_for_plot_x(self, x_coord: float) -> dict[str, object]:
         x_value = float(x_coord)
-        text = self.format_cursor_tag_text_for_plot_x(x_value)
+        timestamp, text = self._cursor_tag_timestamp_and_text(x_value)
         bg_color = self._cursor_tag_no_candle_color
         if self.candlestick_plot is not None:
             direction = self.candlestick_plot.get_candle_direction_for_x(x_value)
@@ -627,7 +635,7 @@ class DearCyFi(dcg.Plot):
                 bg_color = self._cursor_tag_bearish_color
         return {
             "coord": x_value,
-            "real_timestamp": self.expand_cursor_plot_x_to_real_time(x_value),
+            "real_timestamp": timestamp,
             "text": text,
             "bg_color": bg_color,
         }
@@ -1987,6 +1995,12 @@ class DearCyFi(dcg.Plot):
             return locator_time3.DateTimeSpec(locator_time3.DATE_YR, locator_time3.TIMEFMT_NONE)
         return None
 
+    def _expand_x_axis_time(self, x: float) -> float:
+        time_map = self._gap_manager.time_map
+        if self._gap_manager.time_is_collapsed and time_map is not None:
+            return time_map._expand_for_axis(x)
+        return x
+
     def _format_date_context_label(
         self,
         x: float,
@@ -1996,10 +2010,7 @@ class DearCyFi(dcg.Plot):
         use_24_hour: bool,
         use_iso8601: bool,
     ) -> str:
-        if self._gap_manager.time_is_collapsed and self._gap_manager.time_map is not None:
-            t_real = self._gap_manager.time_map.expand(float(x))
-        else:
-            t_real = float(x)
+        t_real = self._expand_x_axis_time(x)
         return locator_time3.format_datetime(
             locator_time3.ImPlotTime.from_double(t_real),
             spec,
@@ -2130,8 +2141,8 @@ class DearCyFi(dcg.Plot):
             # Reformat each generated tick from collapsed coordinates back to real-time labels.
             # Level-0 ticks are minor labels; level-1 ticks are major labels with de-dup logic.
             for tk in sorted(ticks, key=lambda t: float(t.pos)):
-                t_real = self._gap_manager.time_map.expand(float(tk.pos))
-                tp = locator_time3.ImPlotTime.from_double(float(t_real))
+                pos = float(tk.pos)
+                tp = locator_time3.ImPlotTime.from_double(self._expand_x_axis_time(pos))
 
                 if tk.level == 0:
                     label = locator_time3.format_datetime(
@@ -2160,7 +2171,11 @@ class DearCyFi(dcg.Plot):
                         use_iso8601=use_iso8601,
                     )
                     show1 = bool(tk.show_label)
-                    if show1 and last_major_label is not None and locator_time3.time_label_same_suffix(last_major_label, label):
+                    if (
+                        show1
+                        and last_major_label is not None
+                        and locator_time3.time_label_same_suffix(last_major_label, label)
+                    ):
                         show1 = False
                     relabeled.append(
                         locator_time3.Tick(

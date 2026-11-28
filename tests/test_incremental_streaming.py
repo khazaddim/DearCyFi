@@ -4,6 +4,7 @@ import pytest
 import dearcygui as dcg
 
 from dearcyfi import DearCyFi, PlotEconometricSeries
+from dearcyfi.PyTimeLocator import locator_time3
 from dearcyfi.streaming import boundary_tolerance, classify_append_spacing, infer_cadence, latest_interval_matches
 
 
@@ -108,10 +109,8 @@ def test_streaming_keeps_time_axis_labels_instead_of_candle_indices(chart, colla
     assert labels_after_append == list(chart.X1.labels)
     assert coords_after_append == list(chart.X1.labels_coord)
     assert labels_after_append != [str(value) for value in chart.index]
-    if collapsed:
-        assert labels_after_append != initial_labels
-    else:
-        assert labels_after_append == initial_labels
+    assert labels_after_append == initial_labels
+    assert coords_after_append == initial_coords
 
 
 def test_collapsed_gap_append_refreshes_visible_time_labels(chart):
@@ -172,7 +171,7 @@ def test_duplicate_and_out_of_order_appends_are_rejected(chart, offset):
         )
 
 
-def test_collapsed_gap_extension_reprojects_only_follower_suffix(chart):
+def test_collapsed_gap_extension_reprojects_only_follower_suffix(chart, monkeypatch):
     with chart:
         follower = PlotEconometricSeries(
             chart.context,
@@ -183,6 +182,15 @@ def test_collapsed_gap_extension_reprojects_only_follower_suffix(chart):
     chart.register_time_series("liquidity", follower, in_gap="previous")
     chart.collapse_time_chart(debug=False)
     before = follower.plot_dates
+    tick_x = [1_700_001_400.0, 1_700_002_000.0]
+    monkeypatch.setattr(
+        locator_time3.TimeAxisLocator, "__call__",
+        lambda *_: [locator_time3.Tick(x, 0, False, True, "") for x in tick_x],
+    )
+    chart.apply_date_context_labels = False
+    chart.axes_resize_callback(None, None, [(tick_x[0], tick_x[1], 2.5)])
+    old_label, observed_label = chart.X1.labels
+    assert old_label != observed_label
 
     chart.append_candle(
         timestamp=1_700_001_500.0,
@@ -196,6 +204,9 @@ def test_collapsed_gap_extension_reprojects_only_follower_suffix(chart):
     assert after[0] == before[0]
     assert after[1] == pytest.approx(1_700_000_600.0)
     assert after[2] == pytest.approx(1_700_001_400.0)
+    assert list(chart.X1.labels_coord) == tick_x
+    assert chart.X1.labels[0] == observed_label
+    assert chart.X1.labels[1] != observed_label
     assert chart.dates[-1] == pytest.approx(1_700_000_900.0)
     assert chart._gap_manager.time_map is not None
     assert len(chart._gap_manager.time_map._segments) == 2

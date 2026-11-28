@@ -3,7 +3,7 @@ import pytest
 
 import dearcygui as dcg
 
-from dearcyfi import DearCyFi
+from dearcyfi import DearCyFi, PlotEconometricSeries
 from dearcyfi.DCG_Candle_Utils import PlotCandleStick
 from dearcyfi.PyTimeLocator import locator_time3
 
@@ -98,6 +98,42 @@ def test_cursor_bridge_coordinates_use_time_map_expand_behavior(chart):
 
     bridge_x = 25.0
     assert chart.expand_cursor_plot_x_to_real_time(bridge_x) == chart._gap_manager.time_map.expand(bridge_x)
+
+
+def test_collapsed_cursor_tag_uses_axis_time_for_exterior_positions(chart):
+    _load_chart_candles(chart)
+    with chart:
+        follower = PlotEconometricSeries(chart.context, dates=[125.0], values=[1.0])
+    chart.register_time_series("econometric", follower)
+    chart.collapse_time_chart(debug=False)
+
+    for x, timestamp in [(-10.0, -10.0), (50.0, 120.0), (55.0, 125.0)]:
+        state = chart.get_cursor_tag_state_for_plot_x(x)
+        assert state["coord"] == x
+        assert state["real_timestamp"] == timestamp
+        expected = chart.format_cursor_timestamp(timestamp)
+        assert state["text"] == expected
+        chart._update_cursor_tag_from_plot_x(x)
+        assert chart.cursor_tag.text == expected
+    assert follower.plot_dates[0] == 55.0
+    assert chart.expand_cursor_plot_x_to_real_time(50.0) == 110.0
+
+    chart.restore_time_chart()
+    chart._update_cursor_tag_from_plot_x(50.0)
+    assert chart.cursor_tag.text == chart.format_cursor_timestamp(50.0)
+
+
+def test_custom_cursor_formatter_gets_exterior_timestamp_once_and_keeps_its_text(chart):
+    _load_chart_candles(chart)
+    chart.collapse_time_chart(debug=False)
+    calls = []
+    chart.cursor_tag_formatter = lambda timestamp: calls.append(timestamp) or f"ts={timestamp:.1f}"
+
+    state = chart.get_cursor_tag_state_for_plot_x(50.0)
+
+    assert state["real_timestamp"] == 120.0
+    assert state["text"] == "ts=120.0"
+    assert calls == [120.0]
 
 
 def test_invalid_cursor_configuration_and_output_raise_clear_errors(context):
