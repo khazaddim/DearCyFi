@@ -5,7 +5,6 @@
 - [x] 1.3 Add distinct stable indicator IDs and create/edit/remove lifecycle management, with a minimal GUI-facing type/parameter registry or factory.
 - [x] 1.4 Prepare and publish indicator changes with chart-owned candle full replacement, latest revision, and append, including generic candle mutation paths and rollback on failure.
 - [x] 1.5 Add validated `line_color` options to indicator creation and edits; preserve color independently per instance.
-- [ ] 1.6 Add positive screen-pixel `line_thickness` options to indicator creation and edits; preserve thickness independently per instance.
 
 ## 2. Chart series and time coordination
 
@@ -13,7 +12,6 @@
 - [x] 2.2 Register and synchronize followers with the active collapse map, including creation while collapsed, non-candle collapse sources, and normal/gapped appends.
 - [x] 2.3 Preserve identity, hidden state, style, assigned axis, viewport, menu widgets, and coherent time state on updates and edits; clean up registrations, popup state, and callbacks on removal.
 - [x] 2.4 Apply indicator line colors to all finite `DrawPolyline` runs and verify redraw, legend visibility, fit, and missing-value behavior preserve color.
-- [ ] 2.5 Apply indicator line thickness to all finite `DrawPolyline` runs and verify redraw, legend visibility, fit, and missing-value behavior preserve thickness.
 
 ## 3. Demo controls
 
@@ -22,7 +20,6 @@
 - [x] 3.3 Integrate with synthetic streaming, candle reload and symbol changes without adding indicators to the comparison plot; retain the legend-identification probe.
 - [x] 3.4 Document the API, SMA definitions, limitations, and a manual demo walkthrough.
 - [x] 3.5 Add line color editors to the indicator add/edit UI with invalid-value handling.
-- [ ] 3.6 Add line thickness controls to the indicator add/edit UI with invalid-value handling.
 
 ## 4. Verification
 
@@ -35,4 +32,3 @@
 - [x] 4.7 Run a rendered popup/legend interaction probe and record a manual demo walkthrough: add two SMAs, edit and remove one, stream revisions and a gap, collapse/restore, and reload.
 - [x] 4.8 Run `openspec validate add-candle-indicator-series --strict --no-interactive` and request review before implementation.
 - [x] 4.9 Test independent line colors, color edits, invalid colors, color preservation across candle mutations and edits, and the demo add/edit controls.
-- [ ] 4.10 Test independent line thickness, thickness edits, invalid thickness values, thickness preservation across candle mutations and edits, and the demo add/edit controls.
