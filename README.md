@@ -141,6 +141,7 @@ instance = chart.create_indicator(
 	period=20,
 	field="close",
 	y_axis=dcg.Axis.Y1,
+	line_color=(255, 196, 0, 255),
 )
 ```
 
@@ -151,11 +152,19 @@ non-finite. Timestamp gaps do not add synthetic observations or reset the
 window. Indicator instances have independent stable IDs and legend entries;
 valid edits preserve legend visibility, style, Y-axis, viewport, and time
 projection.
+`line_color` is an independent RGBA tuple of integer channels from 0 to 255
+for each indicator instance. The demo exposes a color editor when adding or
+editing an SMA.
 
 Use chart methods to change a managed indicator:
 
 ```python
-chart.edit_indicator(instance.instance_id, period=30, field="high")
+chart.edit_indicator(
+	instance.instance_id,
+	period=30,
+	field="high",
+	line_color=(40, 120, 220, 255),
+)
 chart.remove_indicator(instance.instance_id)
 ```
 

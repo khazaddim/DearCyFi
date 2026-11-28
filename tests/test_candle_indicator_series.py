@@ -99,6 +99,71 @@ def test_chart_manager_create_edit_remove_duplicate_instances(chart):
     assert second.registration_id in chart.time_series_ids
 
 
+def test_indicator_line_colors_are_independent_validated_and_preserved(chart):
+    first_color = (20, 40, 60, 255)
+    second_color = (200, 150, 100, 255)
+    first = chart.create_indicator(period=2, field="close", line_color=first_color)
+    second = chart.create_indicator(period=2, field="close", line_color=second_color)
+
+    assert first.series.line_color == first_color
+    assert second.series.line_color == second_color
+    first_line = next(child for child in first.series.children if isinstance(child, dcg.DrawPolyline))
+    assert first_line.color == pytest.approx([20 / 255, 40 / 255, 60 / 255, 1.0])
+
+    first.series.show = False
+    before_children = list(first.series.children)
+    with pytest.raises(ValueError, match="line_color"):
+        chart.edit_indicator(first.instance_id, line_color=(1, 2, 3))
+    assert first.series.line_color == first_color
+    assert first.series.children == before_children
+
+    edited_color = (80, 100, 120, 255)
+    chart.edit_indicator(first.instance_id, line_color=edited_color)
+    assert first.series.line_color == edited_color
+    assert second.series.line_color == second_color
+    assert first.series.show is False
+    assert [child.color for child in first.series.children if isinstance(child, dcg.DrawPolyline)] == [
+        pytest.approx([80 / 255, 100 / 255, 120 / 255, 1.0])
+    ]
+
+    chart.update_last_candle(close=4.5)
+    assert first.series.line_color == edited_color
+    updated_line = next(
+        child for child in first.series.children if isinstance(child, dcg.DrawPolyline)
+    )
+    assert updated_line.color == pytest.approx([80 / 255, 100 / 255, 120 / 255, 1.0])
+    chart.edit_indicator(first.instance_id, period=3)
+    assert first.series.line_color == edited_color
+
+
+def test_indicator_line_color_is_applied_to_every_finite_run():
+    context = dcg.Context()
+    series = PlotCandleIndicatorSeries(
+        context,
+        indicator_id="gapped-color-test",
+        calculator=SMA(period=1),
+        candles=candle_snapshot([1.0, 2.0, np.nan, 4.0, 5.0]),
+        line_color=(10, 20, 30, 255),
+    )
+    polylines = [child for child in series.children if isinstance(child, dcg.DrawPolyline)]
+
+    assert len(polylines) == 2
+    assert all(
+        line.color == pytest.approx([10 / 255, 20 / 255, 30 / 255, 1.0])
+        for line in polylines
+    )
+
+
+@pytest.mark.parametrize(
+    "line_color",
+    [(1, 2, 3), (1, 2, 3, 256), (1, 2.0, 3, 4), (1, 2, 3, True), np.array(1)],
+)
+def test_indicator_rejects_invalid_line_colors_on_creation(chart, line_color):
+    with pytest.raises(ValueError, match="line_color"):
+        chart.create_indicator(period=2, field="close", line_color=line_color)
+    assert chart.indicator_ids == ()
+
+
 def test_invalid_edit_does_not_mutate(chart):
     instance = chart.create_indicator(period=2, field="close")
     before_values = instance.series.values.copy()

@@ -793,8 +793,20 @@ class DearCyFi(dcg.Plot):
 
     add_indicator = create_indicator
 
-    def edit_indicator(self, instance_id: str, *, period: object, field: str):
-        return self._indicator_manager.edit(instance_id, period=period, field=field)
+    def edit_indicator(
+        self,
+        instance_id: str,
+        *,
+        period: object | None = None,
+        field: str | None = None,
+        line_color: object | None = None,
+    ):
+        return self._indicator_manager.edit(
+            instance_id,
+            period=period,
+            field=field,
+            line_color=line_color,
+        )
 
     def remove_indicator(self, instance_id: str) -> None:
         self._indicator_manager.remove(instance_id)

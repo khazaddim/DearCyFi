@@ -9,10 +9,39 @@ from typing import Any
 import dearcygui as dcg
 import numpy as np
 
-from .econometric_series import PlotEconometricSeries
+from .econometric_series import DEFAULT_LINE_COLOR, PlotEconometricSeries
 
 
 SUPPORTED_OHLC_FIELDS = ("open", "high", "low", "close")
+
+
+def validate_indicator_line_color(line_color: object) -> tuple[int, int, int, int]:
+    if not isinstance(line_color, (tuple, list, np.ndarray)):
+        raise ValueError(
+            "line_color must be an RGBA tuple with four integer channels from 0 to 255"
+        )
+    try:
+        if len(line_color) != 4:
+            raise ValueError(
+                "line_color must be an RGBA tuple with four integer channels from 0 to 255"
+            )
+    except TypeError as exc:
+        raise ValueError(
+            "line_color must be an RGBA tuple with four integer channels from 0 to 255"
+        ) from exc
+    channels = []
+    for channel in line_color:
+        if isinstance(channel, (bool, np.bool_)) or not isinstance(channel, (int, np.integer)):
+            raise ValueError(
+                "line_color must be an RGBA tuple with four integer channels from 0 to 255"
+            )
+        value = int(channel)
+        if not 0 <= value <= 255:
+            raise ValueError(
+                "line_color must be an RGBA tuple with four integer channels from 0 to 255"
+            )
+        channels.append(value)
+    return tuple(channels)
 
 
 def validate_ohlc_field(field: object) -> str:
@@ -298,8 +327,10 @@ class PlotCandleIndicatorSeries(PlotEconometricSeries):
         calculator: SMA,
         candles: CandleSnapshot,
         y_axis: dcg.Axis = dcg.Axis.Y1,
+        line_color=DEFAULT_LINE_COLOR,
         **kwargs,
     ) -> None:
+        line_color = validate_indicator_line_color(line_color)
         result = calculator.calculate(candles)
         super().__init__(
             context,
@@ -310,6 +341,7 @@ class PlotCandleIndicatorSeries(PlotEconometricSeries):
             y_axis=y_axis,
             markers=False,
             tooltip=True,
+            line_color=line_color,
             **kwargs,
         )
         self.indicator_id = indicator_id
@@ -319,6 +351,10 @@ class PlotCandleIndicatorSeries(PlotEconometricSeries):
     @property
     def parameters(self) -> dict[str, object]:
         return dict(self._parameters)
+
+    @property
+    def line_color(self) -> tuple[int, int, int, int]:
+        return tuple(self._line_color)
 
     def update_all(self, *, dates, values, source_dates=None, label: str | None = None) -> None:
         raise TypeError(
@@ -347,12 +383,18 @@ class PlotCandleIndicatorSeries(PlotEconometricSeries):
         candles: CandleSnapshot,
         plot_dates: object | None = None,
         label: str | None = None,
+        line_color: object | None = None,
     ) -> IndicatorResult:
         result = calculator.calculate(candles)
         source_dates = candles.dates
         plotted = source_dates if plot_dates is None else np.asarray(plot_dates, dtype=float)
         if plotted.ndim != 1 or plotted.size != source_dates.size:
             raise ValueError("plot_dates must be one-dimensional and aligned with candle dates")
+        validated_line_color = (
+            None if line_color is None else validate_indicator_line_color(line_color)
+        )
+        if validated_line_color is not None:
+            self._line_color = validated_line_color
         self._parameters = dict(calculator.parameters)
         self.calculator = calculator
         self.apply_calculation_update(
@@ -462,6 +504,7 @@ class CandleIndicatorManager:
         period: object = 20,
         field: object = "close",
         y_axis: dcg.Axis = dcg.Axis.Y1,
+        line_color=DEFAULT_LINE_COLOR,
         **kwargs,
     ) -> IndicatorInstance:
         calculator = self.registry.create(type, period=period, field=field)
@@ -476,6 +519,7 @@ class CandleIndicatorManager:
                 calculator=calculator,
                 candles=candles,
                 y_axis=y_axis,
+                line_color=line_color,
                 **kwargs,
             )
         if self.chart._gap_manager.time_is_collapsed and self.chart._gap_manager.time_map is not None:
@@ -514,11 +558,16 @@ class CandleIndicatorManager:
         self,
         instance_id: str,
         *,
-        period: object,
-        field: object,
+        period: object | None = None,
+        field: object | None = None,
+        line_color: object | None = None,
     ) -> IndicatorInstance:
         instance = self.get(instance_id)
-        calculator = SMA(period=period, field=field)
+        parameters = instance.calculator.parameters
+        calculator = SMA(
+            period=parameters["period"] if period is None else period,
+            field=parameters["field"] if field is None else field,
+        )
         candles = self._chart_candles()
         result = calculator.calculate(candles)
         plot_dates = np.asarray(instance.series.plot_dates, dtype=float)
@@ -531,6 +580,7 @@ class CandleIndicatorManager:
             calculator=calculator,
             candles=candles,
             plot_dates=plot_dates,
+            line_color=line_color,
         )
         self.chart._plot_dates_by_id[instance.registration_id] = np.asarray(
             instance.series.plot_dates,
